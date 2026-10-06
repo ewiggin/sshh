@@ -188,6 +188,16 @@ fn suggest_alias(host: &str) -> String {
     if validate_alias(alias).is_ok() { alias.to_string() } else { String::new() }
 }
 
+/// ssh binary and arguments to connect to a saved connection from the TUI
+/// (embedded session or full screen). Records the connection in the history.
+pub fn session_command(db: &Db, host: &Host) -> Result<(PathBuf, Vec<String>)> {
+    let args = tool_args(host);
+    if let Err(e) = db.record_connection(host.id, std::slice::from_ref(&host.data.alias)) {
+        debug(format_args!("could not save history: {e:#}"));
+    }
+    Ok((find_ssh()?, args))
+}
+
 /// Arguments for another OpenSSH tool that accepts `-o` (sftp, ssh-copy-id…):
 /// the connection options followed by the alias.
 pub fn tool_args(host: &Host) -> Vec<String> {

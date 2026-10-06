@@ -25,12 +25,20 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   untouched. If it's not saved and the session is interactive, opens the wizard (`SSHH_NO_WIZARD=1`
   disables it). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
 - `db`: SQLite + migrations via `PRAGMA user_version` (append to `MIGRATIONS`, never edit existing ones).
-- `tui`: `sshh` without args, and the wizard. `app.rs` = state + events (testable without a terminal);
-  side effects (DB, clipboard, $EDITOR) are requested through `App::request` and run by `mod.rs`.
-  `form.rs` = add/edit/wizard form. `ui.rs` = rendering. `term.rs` = terminal, $EDITOR and clipboard
-  (wl-copy/xclip, OSC 52 fallback). Connecting leaves the TUI and calls `connect::run`.
+- `tui`: `sshh` without args, and the wizard. Lazygit-style layout: search + list + details on the
+  left, embedded ssh session of the selected connection on the right.
+  `app.rs` = state + events (testable without a terminal); side effects (DB, clipboard, $EDITOR,
+  sessions) are requested through `App::request` and run by `mod.rs`, which owns the sessions and
+  publishes their state in `App::sessions`. `session.rs` = ssh in a PTY (portable-pty) + vt100
+  parser, rendered with tui-term; `key_bytes` encodes keys as xterm does. The loop polls crossterm
+  with a short timeout and redraws when a session reader thread sets `dirty`.
+  `form.rs` = add/edit/wizard form. `ui.rs` = rendering. `term.rs` = terminal, $EDITOR, external
+  programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and
+  clipboard (wl-copy/xclip, OSC 52 fallback).
 - Shortcuts: vim/lazygit style (`j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
-  `o`, `R`, `Tab`, `?`). `Esc` always goes back one level; only `q`/`Ctrl-c` quit.
+  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → terminal, `Alt-h/l` move focus list/terminal, `Alt-j/k` switch sessions.
+  With the terminal focused every other key goes to ssh. `Esc` always goes back one level (except in
+  the terminal); only `q`/`Ctrl-c` quit (confirming if sessions are alive).
 - `cli`: own subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`,
   `ssh-config`); their names are in `model::RESERVED_ALIASES` (add any new subcommand there).
 - `ssh_config`: ssh_config parser to import concrete `Host`s (follows `Include`, ignores wildcards,
@@ -55,3 +63,4 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 3. ✅ Wizard for new connections, CRUD in the TUI, tags, copy command.
 4. ✅ History, JSON import/export, `~/.ssh/config` import.
 5. ✅ Generated ssh_config file; quick actions (sftp, ssh-copy-id).
+6. ✅ Embedded ssh sessions (several at once) next to the list.

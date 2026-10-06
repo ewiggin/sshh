@@ -1,8 +1,9 @@
 //! TUI state and event handling (no dependency on a real terminal).
 //!
-//! Side-effecting operations (database, clipboard, $EDITOR) don't happen here:
-//! they are left in `request` and run by the main loop.
+//! Side-effecting operations (database, clipboard, $EDITOR, ssh sessions)
+//! don't happen here: they are left in `request` and run by the main loop.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
@@ -23,9 +24,14 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Quit,
-    Connect(String),
-    /// Run another OpenSSH tool (sftp, ssh-copy-id) with the connection.
-    Run { program: &'static str, host: Box<Host> },
+}
+
+/// Program run in the full terminal, suspending the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum External {
+    Ssh,
+    Sftp,
+    SshCopyId,
 }
 
 /// Operation the main loop must run.
@@ -37,6 +43,22 @@ pub enum Request {
     /// Edit the focused form field with $EDITOR.
     Editor,
     Reload,
+    /// Open (or reopen, if it ended) the embedded session of a connection.
+    OpenSession(Box<Host>),
+    CloseSession(i64),
+    /// Input for the embedded session of the selected connection.
+    Input(KeyEvent),
+    Paste(String),
+    /// Scroll the selected session's history (positive = back).
+    Scroll(isize),
+    External { program: External, host: Box<Host> },
+}
+
+/// State of the embedded session of a connection, kept in sync by the main loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionState {
+    Alive,
+    Ended,
 }
 
 /// Footer message; cleared on the next key press.
@@ -52,6 +74,8 @@ pub enum Mode {
     Help,
     Form(Box<Form>),
     ConfirmDelete { alias: String },
+    ConfirmClose { id: i64, alias: String },
+    ConfirmQuit { sessions: usize },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -100,6 +124,8 @@ pub enum Focus {
     #[default]
     List,
     Detail,
+    /// The embedded terminal: keys go to the ssh session.
+    Terminal,
 }
 
 /// Visible row after filtering, with the positions (in chars) matching the
@@ -128,10 +154,13 @@ pub struct App {
     /// Latest connections of `history_for` (loaded by the main loop).
     pub history: Vec<HistoryEntry>,
     pub history_for: Option<i64>,
-    /// Areas from the last render (for the mouse).
+    /// Embedded sessions by connection id (kept in sync by the main loop).
+    pub sessions: HashMap<i64, SessionState>,
+    /// Areas from the last render (for the mouse and to size sessions).
     pub rows_area: Rect,
     pub search_area: Rect,
     pub detail_area: Rect,
+    pub terminal_area: Rect,
     matcher: Matcher,
     last_click: Option<(usize, Instant)>,
 }
@@ -153,9 +182,11 @@ impl App {
             outcome: None,
             history: Vec::new(),
             history_for: None,
+            sessions: HashMap::new(),
             rows_area: Rect::default(),
             search_area: Rect::default(),
             detail_area: Rect::default(),
+            terminal_area: Rect::default(),
             matcher: Matcher::new(Config::DEFAULT),
             last_click: None,
         };
@@ -167,6 +198,15 @@ impl App {
     pub fn selected_host(&self) -> Option<&Host> {
         let entry = self.entries.get(self.table.selected()?)?;
         self.hosts.get(entry.index)
+    }
+
+    /// Session state of the selected connection, if it has one.
+    pub fn selected_session(&self) -> Option<SessionState> {
+        self.sessions.get(&self.selected_host()?.id).copied()
+    }
+
+    fn alive_sessions(&self) -> usize {
+        self.sessions.values().filter(|s| **s == SessionState::Alive).count()
     }
 
     /// Replaces the list (after save/delete/reload), trying to keep connection
@@ -304,9 +344,82 @@ impl App {
         self.rows_area.height.max(1) as isize
     }
 
+    /// Opens (or focuses) the embedded session of the selected connection.
     fn connect_selected(&mut self) {
-        if let Some(host) = self.selected_host() {
-            self.outcome = Some(Outcome::Connect(host.data.alias.clone()));
+        let Some(host) = self.selected_host() else { return };
+        if self.selected_session() != Some(SessionState::Alive) {
+            self.request = Some(Request::OpenSession(Box::new(host.clone())));
+        }
+        self.mode = Mode::Normal;
+        self.focus = Focus::Terminal;
+    }
+
+    fn quit(&mut self) {
+        match self.alive_sessions() {
+            0 => self.outcome = Some(Outcome::Quit),
+            sessions => self.mode = Mode::ConfirmQuit { sessions },
+        }
+    }
+
+    /// Moves the selection to the next (or previous) connection with a session.
+    fn switch_session(&mut self, forward: bool) {
+        let with_session: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| self.sessions.contains_key(&self.hosts[self.entries[i].index].id))
+            .collect();
+        let current = self.table.selected().unwrap_or(0);
+        let next = if forward {
+            with_session.iter().find(|&&i| i > current).or(with_session.first())
+        } else {
+            with_session.iter().rev().find(|&&i| i < current).or(with_session.last())
+        };
+        if let Some(&next) = next {
+            self.select(next);
+        }
+    }
+
+    /// Alt-h/j/k/l: move between panes and sessions from anywhere.
+    fn on_alt_key(&mut self, key: KeyEvent) -> bool {
+        if !key.modifiers.contains(KeyModifiers::ALT) {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('h') => self.focus = Focus::List,
+            KeyCode::Char('l') if self.selected_session().is_some() => self.focus = Focus::Terminal,
+            KeyCode::Char('l') => {}
+            KeyCode::Char('j') => self.switch_session(true),
+            KeyCode::Char('k') => self.switch_session(false),
+            _ => return false,
+        }
+        if self.focus == Focus::Terminal && self.selected_session().is_none() {
+            self.focus = Focus::List;
+        }
+        true
+    }
+
+    /// Keys while the embedded terminal has focus: everything goes to ssh.
+    fn on_terminal_key(&mut self, key: KeyEvent) {
+        match self.selected_session() {
+            Some(SessionState::Alive) => self.request = Some(Request::Input(key)),
+            Some(SessionState::Ended) if key.code == KeyCode::Enter => self.connect_selected(),
+            Some(SessionState::Ended) if key.code == KeyCode::Esc => self.focus = Focus::List,
+            Some(SessionState::Ended) => {}
+            None => self.focus = Focus::List,
+        }
+    }
+
+    pub fn on_paste(&mut self, text: &str) {
+        match &mut self.mode {
+            Mode::Normal if self.focus == Focus::Terminal => {
+                if self.selected_session() == Some(SessionState::Alive) {
+                    self.request = Some(Request::Paste(text.to_string()));
+                }
+            }
+            Mode::Search => {
+                self.query.extend(text.chars().filter(|c| !c.is_control()));
+                self.query_changed();
+            }
+            Mode::Form(form) => form.paste(text),
+            _ => {}
         }
     }
 
@@ -324,6 +437,15 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         self.status = None;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if matches!(self.mode, Mode::Normal) {
+            if self.on_alt_key(key) {
+                return;
+            }
+            if self.focus == Focus::Terminal {
+                self.on_terminal_key(key);
+                return;
+            }
+        }
         match &mut self.mode {
             Mode::Form(form) => match form.on_key(key) {
                 FormEvent::None => {}
@@ -339,14 +461,27 @@ impl App {
                     }
                 }
             },
-            _ if ctrl && key.code == KeyCode::Char('c') => self.outcome = Some(Outcome::Quit),
-            Mode::Help => self.mode = Mode::Normal,
             Mode::ConfirmDelete { alias } => {
                 if matches!(key.code, KeyCode::Char('y' | 'Y')) {
                     self.request = Some(Request::Delete { alias: alias.clone() });
                 }
                 self.mode = Mode::Normal;
             }
+            Mode::ConfirmClose { id, .. } => {
+                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.request = Some(Request::CloseSession(*id));
+                    self.focus = Focus::List;
+                }
+                self.mode = Mode::Normal;
+            }
+            Mode::ConfirmQuit { .. } => {
+                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.outcome = Some(Outcome::Quit);
+                }
+                self.mode = Mode::Normal;
+            }
+            _ if ctrl && key.code == KeyCode::Char('c') => self.quit(),
+            Mode::Help => self.mode = Mode::Normal,
             Mode::Search => self.on_search_key(key, ctrl),
             Mode::Normal => self.on_normal_key(key, ctrl),
         }
@@ -358,7 +493,7 @@ impl App {
             return;
         }
         match key.code {
-            KeyCode::Char('q') => self.outcome = Some(Outcome::Quit),
+            KeyCode::Char('q') => self.quit(),
             // Esc goes back one level; it never quits the app.
             KeyCode::Esc if pending.is_none() && !self.query.is_empty() => {
                 self.query.clear();
@@ -367,12 +502,8 @@ impl App {
             KeyCode::Enter => self.connect_selected(),
             KeyCode::Char('/') => self.mode = Mode::Search,
             KeyCode::Char('?') => self.mode = Mode::Help,
-            KeyCode::Tab => {
-                self.focus = match self.focus {
-                    Focus::List => Focus::Detail,
-                    Focus::Detail => Focus::List,
-                }
-            }
+            KeyCode::Tab => self.cycle_focus(true),
+            KeyCode::BackTab => self.cycle_focus(false),
             KeyCode::Char('d') if ctrl => self.move_by(self.page() / 2),
             KeyCode::Char('u') if ctrl => self.move_by(-self.page() / 2),
             KeyCode::Char('f') if ctrl => self.move_by(self.page()),
@@ -387,8 +518,10 @@ impl App {
             KeyCode::Char('e') => self.edit_selected(form::ALIAS),
             KeyCode::Char('t') => self.edit_selected(form::TAGS),
             KeyCode::Char('R') => self.request = Some(Request::Reload),
-            KeyCode::Char('s') => self.run_selected("sftp"),
-            KeyCode::Char('c') => self.run_selected("ssh-copy-id"),
+            KeyCode::Char('f') if !ctrl => self.run_selected(External::Ssh),
+            KeyCode::Char('s') => self.run_selected(External::Sftp),
+            KeyCode::Char('c') => self.run_selected(External::SshCopyId),
+            KeyCode::Char('x') => self.close_selected(),
             KeyCode::Char('o') => {
                 self.sort = self.sort.next();
                 let selected = self.selected_host().map(|h| h.id);
@@ -407,6 +540,18 @@ impl App {
         }
     }
 
+    /// Tab / Shift-Tab: list → details → terminal (only if the selected
+    /// connection has a session) and back. Inside the terminal Tab goes to ssh.
+    fn cycle_focus(&mut self, forward: bool) {
+        let mut panes = vec![Focus::List, Focus::Detail];
+        if self.selected_session().is_some() {
+            panes.push(Focus::Terminal);
+        }
+        let current = panes.iter().position(|f| *f == self.focus).unwrap_or(0);
+        let next = if forward { current + 1 } else { current + panes.len() - 1 };
+        self.focus = panes[next % panes.len()];
+    }
+
     /// Keys while the detail pane has focus; returns false if not consumed.
     fn on_detail_key(&mut self, key: KeyEvent, ctrl: bool) -> bool {
         let half = (self.detail_area.height / 2).max(1) as isize;
@@ -421,9 +566,20 @@ impl App {
         true
     }
 
-    fn run_selected(&mut self, program: &'static str) {
+    fn run_selected(&mut self, program: External) {
         if let Some(host) = self.selected_host() {
-            self.outcome = Some(Outcome::Run { program, host: Box::new(host.clone()) });
+            self.request = Some(Request::External { program, host: Box::new(host.clone()) });
+        }
+    }
+
+    /// Closes the selected connection's session (asking first if it's alive).
+    fn close_selected(&mut self) {
+        let Some(host) = self.selected_host() else { return };
+        let (id, alias) = (host.id, host.data.alias.clone());
+        match self.selected_session() {
+            Some(SessionState::Alive) => self.mode = Mode::ConfirmClose { id, alias },
+            Some(SessionState::Ended) => self.request = Some(Request::CloseSession(id)),
+            None => {}
         }
     }
 
@@ -483,11 +639,15 @@ impl App {
     pub fn on_mouse(&mut self, mouse: MouseEvent) {
         let pos = Position::new(mouse.column, mouse.row);
         let in_detail = self.detail_area.contains(pos);
+        let in_terminal = self.terminal_area.contains(pos) && self.selected_session().is_some();
         match (&mut self.mode, mouse.kind) {
             (Mode::Form(form), MouseEventKind::Down(MouseButton::Left)) => form.on_click(pos),
-            (Mode::Form(_) | Mode::ConfirmDelete { .. }, _) => {}
+            (Mode::Form(_) | Mode::ConfirmDelete { .. } | Mode::ConfirmClose { .. }, _) => {}
+            (Mode::ConfirmQuit { .. }, _) => {}
             (Mode::Help, MouseEventKind::Down(_)) => self.mode = Mode::Normal,
             (Mode::Help, _) => {}
+            (_, MouseEventKind::ScrollDown) if in_terminal => self.request = Some(Request::Scroll(-3)),
+            (_, MouseEventKind::ScrollUp) if in_terminal => self.request = Some(Request::Scroll(3)),
             (_, MouseEventKind::ScrollDown) if in_detail => self.scroll_detail(1),
             (_, MouseEventKind::ScrollUp) if in_detail => self.scroll_detail(-1),
             (_, MouseEventKind::ScrollDown) => self.move_by(1),
@@ -495,6 +655,9 @@ impl App {
             (_, MouseEventKind::Down(MouseButton::Left)) => {
                 if self.search_area.contains(pos) {
                     self.mode = Mode::Search;
+                } else if in_terminal {
+                    self.mode = Mode::Normal;
+                    self.focus = Focus::Terminal;
                 } else if in_detail {
                     self.mode = Mode::Normal;
                     self.focus = Focus::Detail;
@@ -657,7 +820,8 @@ mod tests {
         type_query(&mut app, "#prod");
         app.on_key(ctrl('j'));
         app.on_key(key(KeyCode::Enter));
-        assert_eq!(app.outcome, Some(Outcome::Connect("db1".into())));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.data.alias == "db1"));
+        assert_eq!(app.focus, Focus::Terminal);
     }
 
     #[test]
@@ -679,12 +843,110 @@ mod tests {
 
     #[test]
     fn quick_actions() {
+        for (c, program) in [('s', External::Sftp), ('c', External::SshCopyId), ('f', External::Ssh)] {
+            let mut app = app();
+            app.on_key(ch(c));
+            assert!(
+                matches!(&app.request, Some(Request::External { program: p, host }) if *p == program && host.id == 1),
+                "{c}"
+            );
+        }
+    }
+
+    /// App with a live session on db1 (selected) and an ended one on dev.
+    fn app_with_sessions() -> App {
         let mut app = app();
-        app.on_key(ch('s'));
-        assert!(matches!(&app.outcome, Some(Outcome::Run { program: "sftp", host }) if host.id == 1));
-        let mut app = self::app();
-        app.on_key(ch('c'));
-        assert!(matches!(&app.outcome, Some(Outcome::Run { program: "ssh-copy-id", .. })));
+        app.sessions.insert(2, SessionState::Alive);
+        app.sessions.insert(3, SessionState::Ended);
+        app.on_key(ch('j'));
+        app
+    }
+
+    fn alt(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+    }
+
+    #[test]
+    fn enter_focuses_an_alive_session_without_reopening() {
+        let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!((app.focus, &app.request), (Focus::Terminal, &None));
+    }
+
+    #[test]
+    fn terminal_focus_forwards_every_key() {
+        let mut app = app_with_sessions();
+        app.on_key(alt('l'));
+        assert_eq!(app.focus, Focus::Terminal);
+        for k in [ch('q'), ctrl('c'), key(KeyCode::Esc), ch('/')] {
+            app.on_key(k);
+            assert_eq!(app.request.take(), Some(Request::Input(k)));
+        }
+        assert_eq!(app.outcome, None);
+        app.on_paste("ls\n");
+        assert_eq!(app.request.take(), Some(Request::Paste("ls\n".into())));
+        app.on_key(alt('h'));
+        assert_eq!((app.focus, &app.request), (Focus::List, &None));
+    }
+
+    #[test]
+    fn alt_l_needs_a_session() {
+        let mut app = app();
+        app.on_key(alt('l'));
+        assert_eq!(app.focus, Focus::List);
+    }
+
+    #[test]
+    fn alt_j_k_cycle_through_sessions() {
+        let mut app = app_with_sessions();
+        app.on_key(alt('j'));
+        assert_eq!(app.selected_host().unwrap().id, 3);
+        app.on_key(alt('j'));
+        assert_eq!(app.selected_host().unwrap().id, 2);
+        app.on_key(alt('k'));
+        assert_eq!(app.selected_host().unwrap().id, 3);
+    }
+
+    #[test]
+    fn ended_session_reconnects_on_enter() {
+        let mut app = app_with_sessions();
+        app.on_key(ch('j'));
+        app.on_key(alt('l'));
+        app.on_key(ch('a'));
+        assert_eq!(app.request, None);
+        app.on_key(key(KeyCode::Enter));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 3));
+    }
+
+    #[test]
+    fn closing_and_quitting_ask_when_sessions_are_alive() {
+        let mut app = app_with_sessions();
+        app.on_key(ch('x'));
+        assert!(matches!(&app.mode, Mode::ConfirmClose { id: 2, .. }));
+        app.on_key(ch('y'));
+        assert_eq!(app.request.take(), Some(Request::CloseSession(2)));
+
+        app.on_key(ch('q'));
+        assert!(matches!(app.mode, Mode::ConfirmQuit { sessions: 1 }));
+        app.on_key(ch('n'));
+        assert_eq!(app.outcome, None);
+        app.on_key(ctrl('c'));
+        app.on_key(ch('y'));
+        assert_eq!(app.outcome, Some(Outcome::Quit));
+    }
+
+    #[test]
+    fn wheel_over_the_session_scrolls_its_history() {
+        let mut app = app_with_sessions();
+        app.terminal_area = Rect::new(40, 0, 80, 20);
+        let wheel = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 50,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.on_mouse(wheel);
+        assert_eq!(app.request, Some(Request::Scroll(3)));
     }
 
     #[test]
@@ -761,6 +1023,28 @@ mod tests {
     }
 
     #[test]
+    fn tab_cycles_panes() {
+        let mut app = app();
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Detail);
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::List);
+        app.on_key(key(KeyCode::BackTab));
+        assert_eq!(app.focus, Focus::Detail);
+
+        // With a session the terminal joins the cycle; inside it Tab goes to ssh.
+        let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::BackTab));
+        assert_eq!(app.focus, Focus::Terminal);
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!(app.request.take(), Some(Request::Input(key(KeyCode::Tab))));
+        app.on_key(alt('h'));
+        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Terminal);
+    }
+
+    #[test]
     fn detail_focus_scrolls() {
         let mut app = app();
         app.on_key(key(KeyCode::Tab));
@@ -787,7 +1071,7 @@ mod tests {
         assert_eq!(app.table.selected(), Some(1));
         assert_eq!(app.outcome, None);
         app.on_mouse(click(6));
-        assert_eq!(app.outcome, Some(Outcome::Connect("db1".into())));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 2));
         // Clicking outside the rows does nothing.
         app.on_mouse(click(14));
         assert_eq!(app.table.selected(), Some(1));

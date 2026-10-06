@@ -4,8 +4,9 @@ SSH connection manager for the terminal, written in Rust.
 
 - Use it **just like `ssh`**: `sshh user@host`, `sshh -p 2222 -J bastion web`, etc.
 - When the connection is new, a **wizard** offers to save it with a name, description, tags and notes.
-- Without arguments it opens a **TUI** with fuzzy search, keyboard navigation (vim style) and mouse
-  support.
+- Without arguments it opens a **TUI** (lazygit style) with fuzzy search, keyboard navigation (vim
+  style) and mouse support, where you can keep **several ssh sessions open side by side** with the
+  connection list.
 - **It doesn't reimplement SSH**: it always runs the system `ssh`, so your `~/.ssh/config`,
   `ssh-agent`, `ProxyJump`, `ControlMaster`, `known_hosts`, FIDO keys, etc. keep working.
 - **It doesn't store passwords** or any secrets: use your keys and your agent as usual.
@@ -112,9 +113,35 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
 
 ## TUI
 
-`sshh` without arguments opens the list of connections, a details pane (with the notes and the latest
-connections of the selected one) and a shortcuts bar. The list can be sorted by recent use, by number
-of uses or by alias. If the output isn't a terminal (`sshh | less`), it prints the list as text.
+`sshh` without arguments opens a lazygit-style layout:
+
+```
+╭ Search ────────────╮╭ ● web — deploy@10.0.0.5:2222 ─────────────────╮
+╰────────────────────╯│deploy@web:~$ uptime                           │
+╭ Connections ───────╮│ 12:01 up 3 days, load average: 0.12           │
+│● web  Web          ││deploy@web:~$ █                                │
+│● db1  Database     ││                                               │
+│  bastion           ││                                               │
+╰────────────────────╯│                                               │
+╭ Details ───────────╮│                                               │
+│Web production      ││                                               │
+│Target deploy@…     ││                                               │
+╰────────────────────╯╰───────────────────────────────────────────────╯
+```
+
+- **Left**: search, a simplified connection list and the details of the selected one (target,
+  options, tags, usage, notes).
+- **Right**: the **embedded ssh session** of the selected connection. You can have several sessions
+  open at once; connections with a live session are marked with a green `●` (a grey `○` means the
+  session ended). Without a session, the pane shows the available actions and the latest connections.
+
+Each embedded session is the system `ssh` running inside a pseudo terminal, so everything works as in
+a normal terminal (passwords, host key prompts, agent, full-screen programs like `vim`, `less` or
+`htop`). Sessions are resized with the pane, keep 5000 lines of scrollback (mouse wheel) and accept
+pastes. Quitting `sshh` closes them (it asks first).
+
+The list can be sorted by recent use, by number of uses or by alias. If the output isn't a terminal
+(`sshh | less`), it prints the list as text.
 
 ### Keyboard
 
@@ -122,25 +149,33 @@ Shortcuts follow the conventions of vim, less, lazygit and fzf.
 
 | Key | Action |
 |---|---|
-| `Enter` | connect |
+| `Enter` | open the session in the right pane (or focus it if it's already open; reconnect if it ended) |
+| `Alt-l` / `Alt-h` | focus the terminal / back to the list (works from anywhere) |
+| `Alt-j` / `Alt-k` | next / previous open session |
+| `x` | close the selected session (asks first) |
+| `f` | full-screen ssh, as a plain terminal; you come back to `sshh` when it exits |
 | `j` / `k`, `↓` / `↑` | move |
 | `gg` / `G` | go to top / bottom |
 | `Ctrl-d` / `Ctrl-u` | half page down / up |
 | `Ctrl-f` / `Ctrl-b`, `PgDn` / `PgUp` | page down / up |
-| `Tab` | focus list ↔ details (to scroll long notes) |
+| `Tab` / `Shift-Tab` | next / previous pane: list → details → terminal (the terminal only if the connection has a session; inside it `Tab` goes to ssh, leave with `Alt-h`) |
 | `/` | search |
 | `a` | add a connection |
 | `e` | edit |
 | `t` | edit tags |
 | `dd` | delete (asks for confirmation with `y`) |
 | `yy` | copy the equivalent `ssh` command to the clipboard |
-| `s` | open `sftp` with the connection |
+| `s` | open `sftp` with the connection (full screen, back to `sshh` on exit) |
 | `c` | install your public key on the server (`ssh-copy-id`) |
 | `o` | change sort order: recent → most used → alphabetical |
 | `R` | reload the list |
 | `?` | help |
 | `Esc` | go back one level / clear the search (never quits) |
-| `q`, `Ctrl-c` | quit |
+| `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
+
+While the **terminal has focus, every key goes to the ssh session** (including `Esc`, `Ctrl-c`, `q`
+and `Ctrl-w`), except `Alt-h`/`Alt-l`/`Alt-j`/`Alt-k`. When a session has ended, `Enter` reconnects
+and `Esc` goes back to the list.
 
 ### Search
 
@@ -158,8 +193,9 @@ are highlighted.
 | Action | Effect |
 |---|---|
 | Click on a row | select |
-| Double click | connect |
-| Wheel | move (or scroll when the pointer is over the details) |
+| Double click | open the session |
+| Click on the session | focus the terminal |
+| Wheel | move · scroll the details · scroll back the session history |
 | Click on the search box | search |
 | Click on the details | focus them |
 | Click on a form field | edit that field |
@@ -450,7 +486,8 @@ tmux capture-pane -p -t t
 | `src/tui/app.rs` | TUI state and event handling (no terminal; testable) |
 | `src/tui/form.rs` | add/edit form and wizard |
 | `src/tui/ui.rs` | rendering |
-| `src/tui/term.rs` | terminal, `$EDITOR` and clipboard |
+| `src/tui/session.rs` | embedded sessions: ssh in a pseudo terminal + VT100 emulator, key encoding |
+| `src/tui/term.rs` | terminal, `$EDITOR`, external programs and clipboard |
 
 ## Roadmap
 
@@ -459,6 +496,8 @@ tmux capture-pane -p -t t
 - [x] **Phase 3**: new connection wizard, add/edit/delete in the TUI, tags and copy command.
 - [x] **Phase 4**: history, JSON export/import, `~/.ssh/config` import.
 - [x] **Phase 5**: generated ssh_config file for `Include` and quick actions (sftp, ssh-copy-id).
+- [x] **Phase 6**: embedded ssh sessions next to the list (lazygit style), several at once.
 
 Pending ideas: "don't ask again" for a destination in the wizard, `sshh add` without arguments
-opening the form, configurable shortcuts.
+opening the form, configurable shortcuts, keeping sessions alive after quitting (a background
+server, like tmux), mouse forwarding to remote programs.

@@ -1,13 +1,16 @@
 //! Terminal handling: entering/leaving TUI mode, $EDITOR and clipboard.
 
+use std::ffi::OsStr;
 use std::io::{Write, stdout};
 use std::os::unix::fs::OpenOptionsExt;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -18,19 +21,47 @@ pub fn init() -> Result<DefaultTerminal> {
     // ratatui installs its own hook (restores the terminal and calls this one).
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableMouseCapture, Show);
+        let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste, Show);
         hook(info);
     }));
     let terminal = ratatui::try_init()?;
-    execute!(stdout(), EnableMouseCapture)?;
+    execute!(stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     Ok(terminal)
 }
 
 /// Leaves TUI mode. Also shows the cursor explicitly: ratatui only does it when
 /// the `Terminal` is dropped, which never happens if we `exec` ssh afterwards.
 pub fn restore() {
-    let _ = execute!(stdout(), DisableMouseCapture, Show);
+    let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste, Show);
     ratatui::restore();
+}
+
+/// Hands the terminal over to another program (editor, ssh, sftp…).
+fn suspend() -> Result<()> {
+    execute!(stdout(), DisableMouseCapture, DisableBracketedPaste, LeaveAlternateScreen, Show)?;
+    disable_raw_mode()?;
+    Ok(())
+}
+
+/// Takes the terminal back after `suspend`.
+fn resume(terminal: &mut DefaultTerminal) -> Result<()> {
+    enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
+    terminal.clear()?;
+    Ok(())
+}
+
+/// Runs `program args` in the full terminal and comes back to the TUI.
+pub fn run_external<S: AsRef<OsStr>>(
+    terminal: &mut DefaultTerminal,
+    program: impl AsRef<OsStr>,
+    args: &[S],
+) -> Result<ExitStatus> {
+    let program = program.as_ref();
+    suspend()?;
+    let status = Command::new(program).args(args).status();
+    resume(terminal)?;
+    status.with_context(|| format!("running {}", program.to_string_lossy()))
 }
 
 /// Opens `text` in $VISUAL/$EDITOR (or vi) and returns the result. Suspends the
@@ -48,23 +79,14 @@ pub fn edit_external(terminal: &mut DefaultTerminal, text: &str) -> Result<Strin
         .open(&path)?
         .write_all(text.as_bytes())?;
 
-    execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen, Show)?;
-    disable_raw_mode()?;
     // The editor may carry arguments (`code --wait`), so it goes through the shell.
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} \"$1\""))
-        .arg("sh")
-        .arg(&path)
-        .status();
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
-    terminal.clear()?;
+    let script = format!("{editor} \"$1\"");
+    let status = run_external(terminal, "sh", &[OsStr::new("-c"), OsStr::new(&script), OsStr::new("sh"), path.as_os_str()]);
 
     let result = match status {
         Ok(s) if s.success() => fs::read_to_string(&path).context("reading the edited file"),
         Ok(s) => Err(anyhow::anyhow!("the editor exited with {s}")),
-        Err(e) => Err(anyhow::anyhow!(e).context(format!("running {editor}"))),
+        Err(e) => Err(e.context(format!("running {editor}"))),
     };
     let _ = fs::remove_file(&path);
     result

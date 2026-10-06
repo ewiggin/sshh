@@ -291,6 +291,22 @@ impl Form {
         FormEvent::None
     }
 
+    /// Inserts pasted text in the focused field (line breaks only in
+    /// multiline fields).
+    pub fn paste(&mut self, text: &str) {
+        let multiline = Self::is_multiline(self.focus);
+        let field = &mut self.fields[self.focus];
+        for c in text.chars() {
+            match c {
+                '\r' => {}
+                '\n' if multiline => field.insert('\n'),
+                '\n' => field.insert(' '),
+                c if c.is_control() => {}
+                c => field.insert(c),
+            }
+        }
+    }
+
     /// Click: focuses the field under the mouse.
     pub fn on_click(&mut self, pos: Position) {
         if let Some(i) = self.areas.iter().position(|a| a.contains(pos)) {
@@ -441,6 +457,16 @@ mod tests {
         form.focus = TAGS;
         type_str(&mut form, "#prod, web  db,");
         assert_eq!(form.submit().unwrap().tags, ["prod", "web", "db"]);
+    }
+
+    #[test]
+    fn paste_respects_multiline() {
+        let mut form = Form::new(FormKind::Add, &HostData::default());
+        form.paste("web\r\n1");
+        assert_eq!(form.focused().value, "web 1");
+        form.focus = NOTES;
+        form.paste("a\r\nb");
+        assert_eq!(form.focused().value, "a\nb");
     }
 
     #[test]
