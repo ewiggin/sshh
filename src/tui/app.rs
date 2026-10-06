@@ -1,7 +1,7 @@
-//! Estado del TUI y manejo de eventos (sin dependencias del terminal real).
+//! TUI state and event handling (no dependency on a real terminal).
 //!
-//! Las operaciones con efectos (base de datos, portapapeles, $EDITOR) no se
-//! hacen aquí: se dejan en `request` y las ejecuta el bucle principal.
+//! Side-effecting operations (database, clipboard, $EDITOR) don't happen here:
+//! they are left in `request` and run by the main loop.
 
 use std::time::{Duration, Instant};
 
@@ -19,27 +19,27 @@ use crate::model::{Host, HostData};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
-/// Cómo termina el TUI.
+/// How the TUI ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Quit,
     Connect(String),
-    /// Ejecutar otra herramienta de OpenSSH (sftp, ssh-copy-id) con la conexión.
+    /// Run another OpenSSH tool (sftp, ssh-copy-id) with the connection.
     Run { program: &'static str, host: Box<Host> },
 }
 
-/// Operación que debe ejecutar el bucle principal.
+/// Operation the main loop must run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Save { id: Option<i64>, data: Box<HostData> },
     Delete { alias: String },
     Copy(Box<HostData>),
-    /// Editar con $EDITOR el campo enfocado del formulario.
+    /// Edit the focused form field with $EDITOR.
     Editor,
     Reload,
 }
 
-/// Mensaje en el pie; se borra con la siguiente tecla.
+/// Footer message; cleared on the next key press.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     pub text: String,
@@ -65,9 +65,9 @@ pub enum SortOrder {
 impl SortOrder {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Recent => "recientes",
-            Self::MostUsed => "más usadas",
-            Self::Alias => "alfabético",
+            Self::Recent => "recent",
+            Self::MostUsed => "most used",
+            Self::Alias => "alphabetical",
         }
     }
 
@@ -80,7 +80,7 @@ impl SortOrder {
     }
 
     fn compare(self, a: &Host, b: &Host) -> std::cmp::Ordering {
-        // `Reverse(Option)`: None (nunca usada) queda al final.
+        // `Reverse(Option)`: None (never used) goes last.
         let recent = |h: &Host| std::cmp::Reverse(h.last_used);
         let alias = |h: &Host| h.data.alias.to_lowercase();
         match self {
@@ -102,8 +102,8 @@ pub enum Focus {
     Detail,
 }
 
-/// Fila visible tras filtrar, con las posiciones (en chars) que coinciden con
-/// la búsqueda para resaltarlas.
+/// Visible row after filtering, with the positions (in chars) matching the
+/// search so they can be highlighted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub index: usize,
@@ -120,15 +120,15 @@ pub struct App {
     pub sort: SortOrder,
     pub table: TableState,
     pub detail_scroll: u16,
-    /// Primera tecla de un atajo doble (`gg`, `dd`, `yy`).
+    /// First key of a two-key shortcut (`gg`, `dd`, `yy`).
     pub pending: Option<char>,
     pub status: Option<Status>,
     pub request: Option<Request>,
     pub outcome: Option<Outcome>,
-    /// Últimas conexiones de `history_for` (las carga el bucle principal).
+    /// Latest connections of `history_for` (loaded by the main loop).
     pub history: Vec<HistoryEntry>,
     pub history_for: Option<i64>,
-    /// Zonas del último render (para el ratón).
+    /// Areas from the last render (for the mouse).
     pub rows_area: Rect,
     pub search_area: Rect,
     pub detail_area: Rect,
@@ -169,8 +169,8 @@ impl App {
         self.hosts.get(entry.index)
     }
 
-    /// Sustituye la lista (tras guardar/borrar/recargar) intentando mantener
-    /// seleccionada la conexión `select_id` o, si no, la misma posición.
+    /// Replaces the list (after save/delete/reload), trying to keep connection
+    /// `select_id` selected or, failing that, the same position.
     pub fn set_hosts(&mut self, hosts: Vec<Host>, select_id: Option<i64>) {
         let previous = self.table.selected().unwrap_or(0);
         self.hosts = hosts;
@@ -181,14 +181,14 @@ impl App {
         self.select(by_id.unwrap_or(previous));
     }
 
-    /// Resultado de una petición `Save`.
+    /// Result of a `Save` request.
     pub fn on_saved(&mut self, result: Result<(i64, Vec<Host>), String>) {
         match result {
             Ok((id, hosts)) => {
                 self.mode = Mode::Normal;
                 self.set_hosts(hosts, Some(id));
                 let alias = self.selected_host().map(|h| h.data.alias.clone()).unwrap_or_default();
-                self.info(format!("Conexión «{alias}» guardada"));
+                self.info(format!("Connection '{alias}' saved"));
             }
             Err(msg) => {
                 if let Mode::Form(form) = &mut self.mode {
@@ -214,8 +214,8 @@ impl App {
         self.table.select(selected);
     }
 
-    /// Recalcula las filas visibles. Las palabras `#tag` filtran por tag (por
-    /// prefijo) y el resto se busca en modo fuzzy.
+    /// Recomputes the visible rows. `#tag` words filter by tag (prefix match)
+    /// and the rest is fuzzy searched.
     fn refilter(&mut self) {
         let (tags, words): (Vec<&str>, Vec<&str>) =
             self.query.split_whitespace().partition(|w| w.starts_with('#'));
@@ -246,7 +246,7 @@ impl App {
             let name = d.name.as_deref().unwrap_or_default();
             let name_start = alias_len + 1;
             let name_end = name_start + name.chars().count();
-            // Los dos primeros campos deben ser alias y nombre (ver name_start).
+            // The first two fields must be alias and name (see name_start).
             let haystack = [
                 d.alias.as_str(),
                 name,
@@ -278,13 +278,13 @@ impl App {
             ));
         }
         if !words.trim().is_empty() {
-            // Estable: a igual puntuación se mantiene el orden elegido.
+            // Stable: equal scores keep the chosen order.
             scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
         }
         self.entries = scored.into_iter().map(|(_, e)| e).collect();
     }
 
-    /// Tras cambiar la búsqueda se selecciona el mejor resultado.
+    /// After the query changes, the best result is selected.
     fn query_changed(&mut self) {
         self.refilter();
         self.select(0);
@@ -359,7 +359,7 @@ impl App {
         }
         match key.code {
             KeyCode::Char('q') => self.outcome = Some(Outcome::Quit),
-            // Esc retrocede un nivel; nunca sale de la aplicación.
+            // Esc goes back one level; it never quits the app.
             KeyCode::Esc if pending.is_none() && !self.query.is_empty() => {
                 self.query.clear();
                 self.query_changed();
@@ -394,7 +394,7 @@ impl App {
                 let selected = self.selected_host().map(|h| h.id);
                 let hosts = std::mem::take(&mut self.hosts);
                 self.set_hosts(hosts, selected);
-                self.info(format!("Orden: {}", self.sort.label()));
+                self.info(format!("Sort: {}", self.sort.label()));
             }
             KeyCode::Char(c @ ('g' | 'd' | 'y')) if !ctrl => {
                 if pending == Some(c) {
@@ -407,7 +407,7 @@ impl App {
         }
     }
 
-    /// Teclas con el foco en el detalle; devuelve false si no la consume.
+    /// Keys while the detail pane has focus; returns false if not consumed.
     fn on_detail_key(&mut self, key: KeyEvent, ctrl: bool) -> bool {
         let half = (self.detail_area.height / 2).max(1) as isize;
         match key.code {
@@ -506,7 +506,7 @@ impl App {
         }
     }
 
-    /// Un click selecciona la fila; doble click en la misma fila conecta.
+    /// A click selects the row; a double click on the same row connects.
     fn click_row(&mut self, row: usize) {
         if row >= self.entries.len() {
             return;
@@ -547,11 +547,11 @@ mod tests {
         }
     }
 
-    /// Ordenadas por último uso: web1, db1, dev.
+    /// Sorted by last use: web1, db1, dev.
     fn app() -> App {
         let mut hosts = vec![
-            host(1, "web1", "Web producción", &["prod", "web"]),
-            host(2, "db1", "Base de datos", &["prod", "db"]),
+            host(1, "web1", "Web production", &["prod", "web"]),
+            host(2, "db1", "Database", &["prod", "db"]),
             host(3, "dev", "", &["dev"]),
         ];
         for (host, t) in hosts.iter_mut().zip([30, 20, 10]) {
@@ -595,7 +595,7 @@ mod tests {
         let mut app = app();
         type_query(&mut app, "dat");
         assert_eq!(aliases(&app)[0], "db1");
-        assert_eq!(app.entries[0].name_hl, [8, 9, 10]);
+        assert_eq!(app.entries[0].name_hl, [0, 1, 2]);
         assert!(app.entries[0].alias_hl.is_empty());
     }
 
@@ -605,7 +605,7 @@ mod tests {
         type_query(&mut app, "#pro");
         assert_eq!(aliases(&app), ["web1", "db1"]);
         type_query(&mut app, " db");
-        // Fuzzy: web1 también coincide («proDucción … weB1»), pero puntúa menos.
+        // Fuzzy: web1 matches too ("proDuction … weB1"), but scores lower.
         assert_eq!(aliases(&app)[0], "db1");
         type_query(&mut app, " #db");
         assert_eq!(aliases(&app), ["db1"]);
@@ -621,12 +621,12 @@ mod tests {
         assert_eq!(app.table.selected(), Some(2));
         app.on_key(ch('j'));
         assert_eq!(app.table.selected(), Some(2));
-        // Una sola `g` no mueve; `gg` va al principio.
+        // A single `g` doesn't move; `gg` goes to the top.
         app.on_key(ch('g'));
         assert_eq!(app.table.selected(), Some(2));
         app.on_key(ch('g'));
         assert_eq!(app.table.selected(), Some(0));
-        // `g` seguida de otra tecla cancela el prefijo.
+        // `g` followed by another key cancels the prefix.
         app.on_key(ch('g'));
         app.on_key(ch('j'));
         app.on_key(ch('g'));
@@ -699,14 +699,14 @@ mod tests {
     fn edit_form_submits_save_request() {
         let mut app = app();
         app.on_key(ch('t'));
-        let Mode::Form(form) = &app.mode else { panic!("no hay formulario") };
+        let Mode::Form(form) = &app.mode else { panic!("no form") };
         assert_eq!((form.kind, form.focus), (FormKind::Edit(1), form::TAGS));
         for c in ", nuevo".chars() {
             app.on_key(ch(c));
         }
         app.on_key(key(KeyCode::Enter));
         let Some(Request::Save { id: Some(1), data }) = &app.request else {
-            panic!("se esperaba Save: {:?}", app.request)
+            panic!("expected Save: {:?}", app.request)
         };
         assert_eq!(data.tags, ["prod", "web", "nuevo"]);
 
@@ -721,9 +721,9 @@ mod tests {
     fn save_error_stays_in_form() {
         let mut app = app();
         app.on_key(ch('a'));
-        app.on_saved(Err("ya existe".into()));
-        let Mode::Form(form) = &app.mode else { panic!("no hay formulario") };
-        assert_eq!(form.error.as_deref(), Some("ya existe"));
+        app.on_saved(Err("already exists".into()));
+        let Mode::Form(form) = &app.mode else { panic!("no form") };
+        assert_eq!(form.error.as_deref(), Some("already exists"));
     }
 
     #[test]
@@ -746,7 +746,7 @@ mod tests {
         assert_eq!(aliases(&app), ["A", "c", "b"]);
         app.on_key(ch('o'));
         assert_eq!(aliases(&app), ["A", "b", "c"]);
-        // La selección sigue en la misma conexión.
+        // The selection stays on the same connection.
         assert_eq!(app.selected_host().unwrap().data.alias, "c");
     }
 
@@ -788,7 +788,7 @@ mod tests {
         assert_eq!(app.outcome, None);
         app.on_mouse(click(6));
         assert_eq!(app.outcome, Some(Outcome::Connect("db1".into())));
-        // Fuera de las filas no hace nada.
+        // Clicking outside the rows does nothing.
         app.on_mouse(click(14));
         assert_eq!(app.table.selected(), Some(1));
     }

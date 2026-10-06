@@ -1,4 +1,4 @@
-//! Gestión del terminal: entrar/salir del modo TUI, $EDITOR y portapapeles.
+//! Terminal handling: entering/leaving TUI mode, $EDITOR and clipboard.
 
 use std::io::{Write, stdout};
 use std::os::unix::fs::OpenOptionsExt;
@@ -14,7 +14,7 @@ use ratatui::crossterm::terminal::{
 };
 
 pub fn init() -> Result<DefaultTerminal> {
-    // ratatui instala su propio hook (restaura el terminal y llama a este).
+    // ratatui installs its own hook (restores the terminal and calls this one).
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(stdout(), DisableMouseCapture);
@@ -30,8 +30,8 @@ pub fn restore() {
     ratatui::restore();
 }
 
-/// Abre `text` en $VISUAL/$EDITOR (o vi) y devuelve el resultado. Suspende el
-/// TUI mientras tanto.
+/// Opens `text` in $VISUAL/$EDITOR (or vi) and returns the result. Suspends the
+/// TUI meanwhile.
 pub fn edit_external(terminal: &mut DefaultTerminal, text: &str) -> Result<String> {
     let editor = env::var("VISUAL")
         .or_else(|_| env::var("EDITOR"))
@@ -47,7 +47,7 @@ pub fn edit_external(terminal: &mut DefaultTerminal, text: &str) -> Result<Strin
 
     execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
     disable_raw_mode()?;
-    // El editor puede llevar argumentos (`code --wait`), así que va por la shell.
+    // The editor may carry arguments (`code --wait`), so it goes through the shell.
     let status = Command::new("sh")
         .arg("-c")
         .arg(format!("{editor} \"$1\""))
@@ -59,16 +59,16 @@ pub fn edit_external(terminal: &mut DefaultTerminal, text: &str) -> Result<Strin
     terminal.clear()?;
 
     let result = match status {
-        Ok(s) if s.success() => fs::read_to_string(&path).context("leyendo el archivo editado"),
-        Ok(s) => Err(anyhow::anyhow!("el editor terminó con {s}")),
-        Err(e) => Err(anyhow::anyhow!(e).context(format!("ejecutando {editor}"))),
+        Ok(s) if s.success() => fs::read_to_string(&path).context("reading the edited file"),
+        Ok(s) => Err(anyhow::anyhow!("the editor exited with {s}")),
+        Err(e) => Err(anyhow::anyhow!(e).context(format!("running {editor}"))),
     };
     let _ = fs::remove_file(&path);
     result
 }
 
-/// Copia al portapapeles. Usa wl-copy/xclip si existen; si no, OSC 52 (lo
-/// soportan la mayoría de terminales y funciona también por ssh).
+/// Copies to the clipboard. Uses wl-copy/xclip when available; otherwise OSC 52
+/// (supported by most terminals, and it also works over ssh).
 pub fn copy(text: &str) -> Result<()> {
     let tool: Option<&[&str]> = if env::var_os("WAYLAND_DISPLAY").is_some() {
         Some(&["wl-copy"])
@@ -89,7 +89,7 @@ pub fn copy(text: &str) -> Result<()> {
         if child.wait()?.success() {
             return Ok(());
         }
-        bail!("{cmd} falló");
+        bail!("{cmd} failed");
     }
     let mut out = stdout();
     write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;

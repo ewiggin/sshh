@@ -1,281 +1,283 @@
 # sshh
 
-Gestor de conexiones SSH para la terminal, escrito en Rust.
+SSH connection manager for the terminal, written in Rust.
 
-- Se usa **igual que `ssh`**: `sshh usuario@host`, `sshh -p 2222 -J bastion web`, etc.
-- Si la conexión es nueva, aparece un **wizard** para guardarla con nombre, descripción, tags y notas.
-- Sin argumentos abre un **TUI** con búsqueda fuzzy, navegación por teclado (estilo vim) y ratón.
-- **No reimplementa SSH**: siempre ejecuta el `ssh` del sistema, así que funcionan tu `~/.ssh/config`,
-  `ssh-agent`, `ProxyJump`, `ControlMaster`, `known_hosts`, claves FIDO, etc.
-- **No guarda contraseñas** ni secretos: usa tus claves y tu agente como siempre.
+- Use it **just like `ssh`**: `sshh user@host`, `sshh -p 2222 -J bastion web`, etc.
+- When the connection is new, a **wizard** offers to save it with a name, description, tags and notes.
+- Without arguments it opens a **TUI** with fuzzy search, keyboard navigation (vim style) and mouse
+  support.
+- **It doesn't reimplement SSH**: it always runs the system `ssh`, so your `~/.ssh/config`,
+  `ssh-agent`, `ProxyJump`, `ControlMaster`, `known_hosts`, FIDO keys, etc. keep working.
+- **It doesn't store passwords** or any secrets: use your keys and your agent as usual.
 
-> Estado: en desarrollo. Ver [Roadmap](#roadmap).
+> Status: in development. See the [Roadmap](#roadmap).
 
-## Índice
+## Contents
 
-- [Instalación](#instalación)
-- [Uso rápido](#uso-rápido)
-- [Modo wrapper: `sshh` como `ssh`](#modo-wrapper-sshh-como-ssh)
-- [Wizard de conexiones nuevas](#wizard-de-conexiones-nuevas)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Wrapper mode: `sshh` as `ssh`](#wrapper-mode-sshh-as-ssh)
+- [New connection wizard](#new-connection-wizard)
 - [TUI](#tui)
-- [Formulario de conexión](#formulario-de-conexión)
-- [Subcomandos](#subcomandos)
-- [Importar `~/.ssh/config`](#importar-sshconfig)
-- [Exportar e importar (JSON)](#exportar-e-importar-json)
-- [Historial](#historial)
-- [Integración con ssh, scp, rsync, git…](#integración-con-ssh-scp-rsync-git)
-- [Datos y almacenamiento](#datos-y-almacenamiento)
-- [Variables de entorno](#variables-de-entorno)
-- [Desarrollo](#desarrollo)
+- [Connection form](#connection-form)
+- [Subcommands](#subcommands)
+- [Importing `~/.ssh/config`](#importing-sshconfig)
+- [Export and import (JSON)](#export-and-import-json)
+- [History](#history)
+- [Integration with ssh, scp, rsync, git…](#integration-with-ssh-scp-rsync-git)
+- [Data and storage](#data-and-storage)
+- [Environment variables](#environment-variables)
+- [Development](#development)
 - [Roadmap](#roadmap)
 
-## Instalación
+## Installation
 
-Requisitos: Rust ≥ 1.88 (edición 2024) y OpenSSH instalado. SQLite va incluido en el binario.
+Requirements: Rust ≥ 1.88 (2024 edition) and OpenSSH. SQLite is bundled into the binary.
 
 ```sh
 cargo build --release
 install -Dm755 target/release/sshh ~/.local/bin/sshh
 ```
 
-Opcionalmente, para usarlo siempre en lugar de `ssh`:
+Optionally, to always use it instead of `ssh`:
 
 ```sh
 # ~/.bashrc / ~/.zshrc
 alias ssh=sshh
 ```
 
-Lo que `sshh` no entiende lo pasa tal cual a `ssh`, así que el alias es seguro. Si llegas a instalar
-`sshh` con el nombre `ssh` en el `PATH`, detecta que es él mismo y busca el `ssh` real.
+Anything `sshh` doesn't understand is passed to `ssh` unchanged, so the alias is safe. If you ever
+install `sshh` under the name `ssh` in your `PATH`, it detects itself and looks for the real `ssh`.
 
-## Uso rápido
+## Quick start
 
 ```sh
-sshh                          # abre el TUI
-sshh root@10.0.0.5            # conecta; si es nueva, ofrece guardarla
-sshh web                      # conecta a la conexión guardada con alias «web»
-sshh web uptime               # comando remoto, como con ssh
-sshh -L 8080:localhost:80 web # cualquier opción de ssh funciona
-sshh ls                       # lista las conexiones guardadas
-sshh import-ssh-config        # importa los Host de tu ~/.ssh/config
-sshh history                  # últimas conexiones
+sshh                          # open the TUI
+sshh root@10.0.0.5            # connect; if it's new, offer to save it
+sshh web                      # connect to the saved connection with alias "web"
+sshh web uptime               # remote command, as with ssh
+sshh -L 8080:localhost:80 web # any ssh option works
+sshh ls                       # list saved connections
+sshh import-ssh-config        # import the Host blocks of your ~/.ssh/config
+sshh history                  # latest connections
 ```
 
-## Modo wrapper: `sshh` como `ssh`
+## Wrapper mode: `sshh` as `ssh`
 
-`sshh [opciones de ssh] destino [comando]` acepta exactamente los mismos argumentos que `ssh`
-(incluido `ssh://user@host:port`). Según el destino:
+`sshh [ssh options] destination [command]` accepts exactly the same arguments as `ssh` (including
+`ssh://user@host:port`). Depending on the destination:
 
-| Caso | Qué hace |
+| Case | What it does |
 |---|---|
-| El destino es el **alias** de una conexión guardada | Añade antes del destino `-o HostName=… -o User=… -o Port=…` (y identidad, ProxyJump y opciones extra) **solo para lo que no hayas indicado tú**. Tus flags (`-p`, `-l`, `-i`, `-J`, `-o`) siempre ganan. |
-| El destino **coincide** con una conexión guardada (mismo `usuario@host:puerto`) | Ejecuta `ssh` con tus argumentos intactos y lo apunta en el historial. |
-| El destino **no está guardado** | Abre el [wizard](#wizard-de-conexiones-nuevas) (solo en terminal interactiva). |
-| Sin destino (`-V`, `-Q cipher`…) o argumentos que no entiende | Los pasa tal cual a `ssh`. |
+| The destination is the **alias** of a saved connection | Adds `-o HostName=… -o User=… -o Port=…` (plus identity, ProxyJump and extra options) before the destination, **only for what you didn't set yourself**. Your flags (`-p`, `-l`, `-i`, `-J`, `-o`) always win. |
+| The destination **matches** a saved connection (same `user@host:port`) | Runs `ssh` with your arguments untouched and records it in the history. |
+| The destination **is not saved** | Opens the [wizard](#new-connection-wizard) (interactive terminals only). |
+| No destination (`-V`, `-Q cipher`…) or arguments it doesn't understand | Passes them to `ssh` unchanged. |
 
-Para saber si un destino ya está guardado, `sshh` pregunta a `ssh -G` a dónde conectaría realmente,
-aplicando tu `~/.ssh/config`. Así `sshh ovtest` (un `Host` de tu config) se reconoce igual que
-`sshh somadmin@10.50.1.17 -p 2200`.
+To find out whether a destination is already saved, `sshh` asks `ssh -G` where it would really
+connect, applying your `~/.ssh/config`. So `sshh db1` (a `Host` in your config) is recognised just like
+`sshh admin@10.0.0.17 -p 2200`.
 
-Las llamadas que solo consultan (`-G`, `-V`, `-O`, `-Q`) no abren el wizard ni cuentan en el historial.
+Calls that only query (`-G`, `-V`, `-O`, `-Q`) don't open the wizard and aren't recorded in the
+history.
 
-`sshh` nunca impide una conexión: si falla algo propio (base de datos, parser), lo avisa y ejecuta
-`ssh` con tus argumentos originales.
+`sshh` never gets in the way of a connection: if something of its own fails (database, parser), it
+warns and runs `ssh` with your original arguments.
 
-Para ver qué decide y qué ejecuta exactamente:
+To see what it decides and what exactly it runs:
 
 ```sh
 SSHH_DEBUG=1 sshh web
-# sshh[debug]: «web» es el alias de una conexión guardada
+# sshh[debug]: 'web' is the alias of a saved connection
 # sshh[debug]: exec /usr/bin/ssh -o HostName=10.0.0.5 -o User=deploy -o Port=2222 web
 ```
 
-Para conectar a un host que se llame igual que un subcomando (`ls`, `add`, `rm`, `help`, `history`,
-`export`, `import`, `import-ssh-config`, `ssh-config`), usa `sshh -- ls`.
+To connect to a host named like a subcommand (`ls`, `add`, `rm`, `help`, `history`, `export`,
+`import`, `import-ssh-config`, `ssh-config`), use `sshh -- ls`.
 
-## Wizard de conexiones nuevas
+## New connection wizard
 
-Al conectar a un destino que no está guardado aparece un formulario prerrellenado con lo que diría
-`ssh -G`: host, usuario, puerto y ProxyJump. El alias propuesto es el nombre corto del host
-(`web.example.com` → `web`; las IPs se quedan igual).
+When connecting to a destination that isn't saved, a form shows up prefilled with what `ssh -G`
+reports: host, user, port and ProxyJump. The suggested alias is the short host name
+(`web.example.com` → `web`; IPs stay as they are).
 
-| Tecla | Acción |
+| Key | Action |
 |---|---|
-| `Enter` | guardar y conectar |
-| `Esc` | conectar sin guardar |
-| `Ctrl-c` | cancelar (no conecta) |
+| `Enter` | save and connect |
+| `Esc` | connect without saving |
+| `Ctrl-c` | cancel (doesn't connect) |
 
-Solo aparece si stdin, stdout y stderr son una terminal, así que no molesta en scripts. Se puede
-desactivar con `SSHH_NO_WIZARD=1`.
+It only appears when stdin, stdout and stderr are all terminals, so it never gets in the way of
+scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
 
 ## TUI
 
-`sshh` sin argumentos abre la lista de conexiones, un panel de detalle (con las notas y las últimas
-conexiones de la seleccionada) y una barra de atajos. La lista se puede ordenar por uso reciente, por
-número de usos o por alias. Si la salida no es una terminal (`sshh | less`), imprime la lista en
-texto.
+`sshh` without arguments opens the list of connections, a details pane (with the notes and the latest
+connections of the selected one) and a shortcuts bar. The list can be sorted by recent use, by number
+of uses or by alias. If the output isn't a terminal (`sshh | less`), it prints the list as text.
 
-### Teclado
+### Keyboard
 
-Los atajos siguen las convenciones de vim, less, lazygit y fzf.
+Shortcuts follow the conventions of vim, less, lazygit and fzf.
 
-| Tecla | Acción |
+| Key | Action |
 |---|---|
-| `Enter` | conectar |
-| `j` / `k`, `↓` / `↑` | mover |
-| `gg` / `G` | ir al principio / al final |
-| `Ctrl-d` / `Ctrl-u` | media página abajo / arriba |
-| `Ctrl-f` / `Ctrl-b`, `PgDn` / `PgUp` | página abajo / arriba |
-| `Tab` | foco lista ↔ detalle (para hacer scroll en notas largas) |
-| `/` | buscar |
-| `a` | nueva conexión |
-| `e` | editar |
-| `t` | editar tags |
-| `dd` | borrar (pide confirmación con `y`) |
-| `yy` | copiar el comando `ssh` equivalente al portapapeles |
-| `s` | abrir `sftp` con la conexión |
-| `c` | instalar tu clave pública en el servidor (`ssh-copy-id`) |
-| `o` | cambiar el orden: recientes → más usadas → alfabético |
-| `R` | recargar la lista |
-| `?` | ayuda |
-| `Esc` | volver un nivel / limpiar la búsqueda (nunca sale) |
-| `q`, `Ctrl-c` | salir |
+| `Enter` | connect |
+| `j` / `k`, `↓` / `↑` | move |
+| `gg` / `G` | go to top / bottom |
+| `Ctrl-d` / `Ctrl-u` | half page down / up |
+| `Ctrl-f` / `Ctrl-b`, `PgDn` / `PgUp` | page down / up |
+| `Tab` | focus list ↔ details (to scroll long notes) |
+| `/` | search |
+| `a` | add a connection |
+| `e` | edit |
+| `t` | edit tags |
+| `dd` | delete (asks for confirmation with `y`) |
+| `yy` | copy the equivalent `ssh` command to the clipboard |
+| `s` | open `sftp` with the connection |
+| `c` | install your public key on the server (`ssh-copy-id`) |
+| `o` | change sort order: recent → most used → alphabetical |
+| `R` | reload the list |
+| `?` | help |
+| `Esc` | go back one level / clear the search (never quits) |
+| `q`, `Ctrl-c` | quit |
 
-### Búsqueda
+### Search
 
-`/` activa la búsqueda **fuzzy** sobre alias, nombre, usuario, host, descripción y tags. Las letras que
-coinciden se resaltan.
+`/` starts a **fuzzy** search over alias, name, user, host, description and tags. Matching letters
+are highlighted.
 
-- `#tag` filtra por tag (por prefijo): `#prod`, `#prod web`, `#prod #db`.
-- `Enter` conecta con el resultado seleccionado (como en fzf).
-- `↑` / `↓`, `Ctrl-j` / `Ctrl-k` o `Ctrl-n` / `Ctrl-p` mueven sin salir de la búsqueda.
-- `Ctrl-w` borra una palabra; `Ctrl-u` borra todo.
-- `Esc` vuelve a la lista manteniendo el filtro; un segundo `Esc` lo limpia.
+- `#tag` filters by tag (prefix match): `#prod`, `#prod web`, `#prod #db`.
+- `Enter` connects to the selected result (like fzf).
+- `↑` / `↓`, `Ctrl-j` / `Ctrl-k` or `Ctrl-n` / `Ctrl-p` move without leaving the search.
+- `Ctrl-w` deletes a word; `Ctrl-u` deletes everything.
+- `Esc` goes back to the list keeping the filter; a second `Esc` clears it.
 
-### Ratón
+### Mouse
 
-| Acción | Efecto |
+| Action | Effect |
 |---|---|
-| Click en una fila | seleccionar |
-| Doble click | conectar |
-| Rueda | mover (o scroll si el cursor está sobre el detalle) |
-| Click en el cuadro de búsqueda | buscar |
-| Click en el detalle | darle el foco |
-| Click en un campo del formulario | editar ese campo |
+| Click on a row | select |
+| Double click | connect |
+| Wheel | move (or scroll when the pointer is over the details) |
+| Click on the search box | search |
+| Click on the details | focus them |
+| Click on a form field | edit that field |
 
-## Formulario de conexión
+## Connection form
 
-El mismo formulario se usa para crear (`a`), editar (`e`, `t`) y en el wizard.
+The same form is used to add (`a`), edit (`e`, `t`) and in the wizard.
 
-| Campo | Notas |
+| Field | Notes |
 |---|---|
-| Alias | Obligatorio y único. Es lo que usas en `sshh <alias>`. Sin espacios ni `* ? ! , @ " #`. |
-| Host | Obligatorio. Hostname o IP. |
-| Usuario, Puerto | Opcionales. Vacío = lo que decida ssh (usuario local, 22). |
-| Identidad | Ruta a la clave (`IdentityFile`). |
-| ProxyJump | `bastion` o `user@host:port`. |
-| Nombre, Descripción | Texto libre para identificarla. |
-| Tags | Separados por comas o espacios; el `#` inicial es opcional. |
-| Opciones | Opciones extra de ssh_config, una por línea: `ForwardAgent=yes`. |
-| Notas | Texto multilínea libre. |
+| Alias | Required and unique. It's what you use in `sshh <alias>`. No spaces or `* ? ! , @ " #`. |
+| Host | Required. Hostname or IP. |
+| User, Port | Optional. Empty = whatever ssh decides (local user, 22). |
+| Identity | Path to the key (`IdentityFile`). |
+| ProxyJump | `bastion` or `user@host:port`. |
+| Name, Description | Free text to identify it. |
+| Tags | Separated by commas or spaces; the leading `#` is optional. |
+| Options | Extra ssh_config options, one per line: `ForwardAgent=yes`. |
+| Notes | Free multiline text. |
 
-| Tecla | Acción |
+| Key | Action |
 |---|---|
-| `Tab` / `Shift-Tab`, `↓` / `↑` | campo siguiente / anterior (en campos multilínea, las flechas recorren líneas) |
-| `Enter` | guardar (en Opciones y Notas inserta un salto de línea) |
-| `Ctrl-s` | guardar desde cualquier campo |
-| `Ctrl-e` | editar Opciones o Notas en `$VISUAL` / `$EDITOR` (o `vi`) |
-| `Ctrl-w` / `Ctrl-u` | borrar palabra / hasta el inicio de línea |
-| `Home` / `Ctrl-a`, `End` | inicio / fin de línea |
-| `Esc` | cancelar (en el wizard: conectar sin guardar) |
+| `Tab` / `Shift-Tab`, `↓` / `↑` | next / previous field (in multiline fields the arrows move between lines) |
+| `Enter` | save (inserts a line break in Options and Notes) |
+| `Ctrl-s` | save from any field |
+| `Ctrl-e` | edit Options or Notes in `$VISUAL` / `$EDITOR` (or `vi`) |
+| `Ctrl-w` / `Ctrl-u` | delete word / up to the start of the line |
+| `Home` / `Ctrl-a`, `End` | start / end of line |
+| `Esc` | cancel (in the wizard: connect without saving) |
 
-Si un dato no es válido (puerto incorrecto, alias repetido…), el foco salta a ese campo y el error
-aparece en rojo.
+If a value is invalid (wrong port, duplicate alias…), focus jumps to that field and the error is shown
+in red.
 
-## Subcomandos
+## Subcommands
 
-Además del TUI, hay subcomandos para scripts o uso rápido:
+Besides the TUI, there are subcommands for scripts or quick use:
 
 ```sh
-sshh ls                                   # lista en texto
-sshh add <alias> <destino> [opciones]     # guardar una conexión
-sshh rm <alias>                           # borrar una conexión
-sshh history [alias] [-n N]               # últimas conexiones
-sshh export [-o fichero]                  # exportar a JSON
-sshh import <fichero|->                   # importar desde JSON
-sshh import-ssh-config [fichero]          # importar los Host de ~/.ssh/config
-sshh ssh-config [status|sync|print|disable]  # fichero ssh_config generado (ver abajo)
-sshh --help                               # ayuda (también `sshh <subcomando> --help`)
+sshh ls                                      # list as text
+sshh add <alias> <destination> [options]     # save a connection
+sshh rm <alias>                              # delete a connection
+sshh history [alias] [-n N]                  # latest connections
+sshh export [-o file]                        # export to JSON
+sshh import <file|->                         # import from JSON
+sshh import-ssh-config [file]                # import the Host blocks of ~/.ssh/config
+sshh ssh-config [status|sync|print|disable]  # generated ssh_config file (see below)
+sshh --help                                  # help (also `sshh <subcommand> --help`)
 ```
 
-Opciones de `sshh add`:
+`sshh add` options:
 
-| Opción | Descripción |
+| Option | Description |
 |---|---|
-| `-p, --port <PUERTO>` | puerto |
-| `-i, --identity <RUTA>` | clave (`IdentityFile`) |
-| `-J, --jump <DESTINO>` | ProxyJump |
-| `-o, --option <Clave=Valor>` | opción extra de ssh_config (repetible) |
-| `-n, --name <TEXTO>` | nombre |
-| `-d, --description <TEXTO>` | descripción |
-| `--notes <TEXTO>` | notas |
-| `-t, --tag <TAGS>` | tags separados por comas (repetible) |
+| `-p, --port <PORT>` | port |
+| `-i, --identity <PATH>` | key (`IdentityFile`) |
+| `-J, --jump <DESTINATION>` | ProxyJump |
+| `-o, --option <Key=Value>` | extra ssh_config option (repeatable) |
+| `-n, --name <TEXT>` | name |
+| `-d, --description <TEXT>` | description |
+| `--notes <TEXT>` | notes |
+| `-t, --tag <TAGS>` | comma separated tags (repeatable) |
 
 ```sh
-sshh add web deploy@10.0.0.5 -p 2222 -i ~/.ssh/deploy -n "Web producción" -t prod,web \
-  -o ForwardAgent=yes --notes "Reiniciar: sudo systemctl restart nginx"
+sshh add web deploy@10.0.0.5 -p 2222 -i ~/.ssh/deploy -n "Web production" -t prod,web \
+  -o ForwardAgent=yes --notes "Restart: sudo systemctl restart nginx"
 ```
 
-## Importar `~/.ssh/config`
+## Importing `~/.ssh/config`
 
 ```sh
-sshh import-ssh-config --dry-run          # ver qué se importaría
-sshh import-ssh-config -t ssh-config      # importar añadiendo el tag «ssh-config»
-sshh import-ssh-config otra/config        # otro fichero
+sshh import-ssh-config --dry-run          # see what would be imported
+sshh import-ssh-config -t ssh-config      # import, adding the "ssh-config" tag
+sshh import-ssh-config other/config       # another file
 ```
 
-- Se importa cada bloque `Host` con nombres concretos. `Host web1 web2` crea dos conexiones.
-- `HostName`, `User`, `Port`, `IdentityFile` y `ProxyJump` van a sus campos; el resto de opciones
-  (`LocalForward`, `ForwardAgent`, más `IdentityFile`…) se guardan como opciones extra.
-- Sin `HostName`, el host es el propio alias (igual que hace ssh).
-- Los comentarios justo encima de un `Host` pasan a ser sus notas.
-- Si un alias aparece en varios bloques, se combinan y gana el primer valor de cada opción, como en ssh.
-- Se siguen los `Include` (con rutas relativas a `~/.ssh` y comodines como `config.d/*`).
-- **No se importan** los `Host` con comodines o negaciones (`Host *`, `Host *.lan`, `!foo`), los bloques
-  `Match` ni las opciones globales: ssh los sigue aplicando igualmente al conectar. El comando los lista
-  al final para que sepas cuáles son.
+- Every `Host` block with concrete names is imported. `Host web1 web2` creates two connections.
+- `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump` go to their fields; any other option
+  (`LocalForward`, `ForwardAgent`, additional `IdentityFile`s…) is stored as an extra option.
+- Without `HostName`, the host is the alias itself (as ssh does).
+- Comments right above a `Host` become its notes.
+- If an alias appears in several blocks, they are merged and the first value of each option wins, as
+  in ssh.
+- `Include`s are followed (with paths relative to `~/.ssh` and wildcards like `config.d/*`).
+- **Not imported**: `Host` patterns with wildcards or negations (`Host *`, `Host *.lan`, `!foo`),
+  `Match` blocks and global options. ssh still applies them when connecting. The command lists them at
+  the end so you know which ones they are.
 
-Opciones comunes a `import` e `import-ssh-config`:
+Options shared by `import` and `import-ssh-config`:
 
-| Opción | Descripción |
+| Option | Description |
 |---|---|
-| `-n, --dry-run` | muestra qué pasaría sin guardar nada |
-| `--on-conflict skip` | (por defecto) si el alias ya existe con otros datos, no la importa |
-| `--on-conflict overwrite` | reemplaza la existente |
-| `--on-conflict rename` | la importa con otro alias (`web-2`, `web-3`…) |
+| `-n, --dry-run` | show what would happen without saving anything |
+| `--on-conflict skip` | (default) if the alias already exists with different data, don't import it |
+| `--on-conflict overwrite` | replace the existing one |
+| `--on-conflict rename` | import it under another alias (`web-2`, `web-3`…) |
 
-Las conexiones que ya existen con los mismos datos se cuentan como «sin cambios», así que importar
-dos veces no duplica nada.
+Connections that already exist with the same data are counted as "unchanged", so importing twice
+never duplicates anything.
 
 ```text
 $ sshh import-ssh-config
-3 nuevas
-  + ovtest
-  + stcas1
-  + nusakan
+3 new
+  + db1
+  + web1
+  + web2
 ```
 
-## Exportar e importar (JSON)
+## Export and import (JSON)
 
 ```sh
-sshh export -o conexiones.json            # se crea con permisos 0600 (las notas pueden ser sensibles)
-sshh export > conexiones.json
-sshh import conexiones.json
-sshh import --on-conflict rename conexiones.json
-cat conexiones.json | sshh import -
+sshh export -o connections.json           # created with 0600 permissions (notes may be sensitive)
+sshh export > connections.json
+sshh import connections.json
+sshh import --on-conflict rename connections.json
+cat connections.json | sshh import -
 ```
 
-El export incluye todos los datos de cada conexión, pero no el historial. Formato:
+The export includes all the data of every connection, but not the history. Format:
 
 ```json
 {
@@ -290,88 +292,88 @@ El export incluye todos los datos de cada conexión, pero no el historial. Forma
       "identity_file": "~/.ssh/deploy",
       "proxy_jump": "bastion",
       "extra_options": [{ "key": "ForwardAgent", "value": "yes" }],
-      "name": "Web producción",
-      "description": "Frontend nginx",
-      "notes": "Reiniciar: sudo systemctl restart nginx",
+      "name": "Web production",
+      "description": "nginx frontend",
+      "notes": "Restart: sudo systemctl restart nginx",
       "tags": ["prod", "web"]
     }
   ]
 }
 ```
 
-Solo `alias` y `hostname` son obligatorios. `sshh import` también acepta directamente una lista
-`[{...}, {...}]`, lo que facilita generar el fichero desde otras herramientas. Las entradas no válidas
-se omiten con su motivo y el resto se importa.
+Only `alias` and `hostname` are required. `sshh import` also accepts a plain list
+`[{...}, {...}]`, which makes it easy to generate the file from other tools. Invalid entries are
+skipped with their reason and the rest is imported.
 
-## Historial
+## History
 
-Cada conexión que pasa por `sshh` a un host guardado queda registrada con la fecha y los argumentos.
+Every connection to a saved host that goes through `sshh` is recorded with its date and arguments.
 
 ```text
 $ sshh history
-FECHA             ALIAS   COMANDO
-2026-10-07 13:27  web     sshh web
-2026-10-07 13:27  ovtest  sshh -v ovtest
-2026-10-07 13:27  web     sshh web uptime
+DATE              ALIAS  COMMAND
+2026-10-07 13:27  web    sshh web
+2026-10-07 13:27  db1    sshh -v db1
+2026-10-07 13:27  web    sshh web uptime
 ```
 
-- `sshh history web` muestra solo las de una conexión; `-n 50` cambia el límite (20 por defecto).
-- En el TUI, el detalle muestra las 5 últimas de la conexión seleccionada, y la lista se puede ordenar
-  por uso reciente o por número de usos (`o`).
-- No se registran las llamadas que solo consultan (`-G`, `-V`, `-O`, `-Q`) ni las conexiones a
-  destinos no guardados.
+- `sshh history web` shows only one connection's entries; `-n 50` changes the limit (20 by default).
+- In the TUI, the details pane shows the latest 5 of the selected connection, and the list can be
+  sorted by recent use or by number of uses (`o`).
+- Calls that only query (`-G`, `-V`, `-O`, `-Q`) and connections to unsaved destinations are not
+  recorded.
 
-## Integración con ssh, scp, rsync, git…
+## Integration with ssh, scp, rsync, git…
 
-`sshh` puede mantener un fichero `~/.ssh/config.d/sshh.conf` con un bloque `Host` por cada conexión
-guardada. Al incluirlo desde tu `~/.ssh/config`, **cualquier herramienta** que use ssh conoce tus
-alias aunque no pase por `sshh`: `ssh web`, `scp fichero web:`, `rsync -a dir/ web:`,
-`git clone web:repo`, VS Code Remote-SSH, Ansible…
+`sshh` can maintain a `~/.ssh/config.d/sshh.conf` file with one `Host` block per saved connection.
+Once it's included from your `~/.ssh/config`, **any tool** that uses ssh knows your aliases even
+without going through `sshh`: `ssh web`, `scp file web:`, `rsync -a dir/ web:`, `git clone web:repo`,
+VS Code Remote-SSH, Ansible…
 
-**`sshh` nunca modifica tu `~/.ssh/config`.** Solo escribe su propio fichero; la línea que lo incluye
-la añades tú.
+**`sshh` never modifies your `~/.ssh/config`.** It only writes its own file; you add the line that
+includes it.
 
-### Activarlo
+### Enabling it
 
-1. Añade esta línea **al principio** de `~/.ssh/config`, antes de cualquier `Host` o `Match`:
+1. Add this line **at the top** of `~/.ssh/config`, before any `Host` or `Match`:
 
-   ```sshconfig
+   ```
    Include config.d/sshh.conf
    ```
 
-   Tiene que ir arriba: en ssh_config, un `Include` escrito después de un bloque `Host` forma parte
-   de ese bloque y solo se aplicaría a ese host. La ruta relativa se resuelve desde `~/.ssh`. Si el
-   fichero aún no existe, ssh simplemente lo ignora, así que puedes añadir la línea antes del paso 2.
+   It must go at the top: in ssh_config, an `Include` written after a `Host` block is part of that
+   block and would only apply to that host. The relative path is resolved from `~/.ssh`. If the file
+   doesn't exist yet, ssh just ignores it, so you can add the line before step 2.
 
-2. Genera el fichero:
+2. Generate the file:
 
    ```sh
    sshh ssh-config sync
    ```
 
-3. Comprueba que todo está bien:
+3. Check that everything is fine:
 
    ```sh
-   sshh ssh-config            # estado: activado y bien incluido
-   ssh -G web | head          # ssh ya resuelve el alias
+   sshh ssh-config            # status: enabled and correctly included
+   ssh -G web | head          # ssh now resolves the alias
    ```
 
-Desde ese momento el fichero se regenera solo cada vez que guardas, editas, borras o importas
-conexiones (desde el TUI, el wizard o la CLI).
+From then on the file is regenerated automatically every time you save, edit, delete or import
+connections (from the TUI, the wizard or the CLI).
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `sshh ssh-config` / `status` | dice si está activado y si `~/.ssh/config` lo incluye (y si la línea está mal colocada) |
-| `sshh ssh-config sync` | genera el fichero ahora y lo activa |
-| `sshh ssh-config print` | muestra lo que se generaría, sin escribir nada |
-| `sshh ssh-config disable` | borra el fichero y deja de actualizarlo (la línea `Include` puede quedarse) |
+| `sshh ssh-config` / `status` | tells whether it's enabled and whether `~/.ssh/config` includes it (and whether the line is misplaced) |
+| `sshh ssh-config sync` | generates the file now and enables it |
+| `sshh ssh-config print` | shows what would be generated, without writing anything |
+| `sshh ssh-config disable` | deletes the file and stops updating it (the `Include` line can stay) |
 
-Ejemplo de fichero generado (permisos `0600`, escrito de forma atómica). Las notas **no** se incluyen:
+Example generated file (`0600` permissions, written atomically). Notes are **not** included:
 
 ```sshconfig
-# Generado por sshh: no lo edites, se sobrescribe con cada cambio.
+# Generated by sshh: do not edit, it is overwritten on every change.
 
-# Web producción — Frontend nginx
+# Web production — nginx frontend
 Host web
     HostName 10.0.0.5
     User deploy
@@ -380,54 +382,52 @@ Host web
     LocalForward 8080 localhost:80
 ```
 
-**Si un alias está a la vez en tu `~/.ssh/config` y en `sshh`** (por ejemplo, tras
-`sshh import-ssh-config`), con el `Include` arriba gana el valor de `sshh` para cada opción que defina,
-porque ssh se queda con el primer valor que encuentra. Las opciones que solo estén en tu config se
-siguen aplicando. Si quieres que la fuente de verdad sea `sshh`, puedes borrar esos bloques de tu
-config. `sshh import-ssh-config` nunca importa el fichero generado.
+**If an alias is both in your `~/.ssh/config` and in `sshh`** (for example after
+`sshh import-ssh-config`), with the `Include` at the top `sshh`'s value wins for every option it
+defines, because ssh keeps the first value it finds. Options that are only in your config still apply.
+If you want `sshh` to be the source of truth, you can delete those blocks from your config.
+`sshh import-ssh-config` never imports the generated file.
 
-## Datos y almacenamiento
+## Data and storage
 
-- Base de datos SQLite en `~/.local/share/sshh/sshh.db` (directorio con permisos `0700`).
-- Se guardan: alias, host, usuario, puerto, identidad, ProxyJump, opciones extra, nombre, descripción,
-  notas, tags e historial de conexiones (fecha y argumentos).
-- **No se guardan contraseñas ni claves.**
-- El esquema se migra solo al arrancar.
+- SQLite database at `~/.local/share/sshh/sshh.db` (directory with `0700` permissions).
+- Stored: alias, host, user, port, identity, ProxyJump, extra options, name, description, notes, tags
+  and connection history (date and arguments).
+- **No passwords or keys are stored.**
+- The schema migrates itself on startup.
+- Optionally, `~/.ssh/config.d/sshh.conf` (see [Integration](#integration-with-ssh-scp-rsync-git)),
+  generated from the database: SQLite remains the source of truth.
 
-- Opcionalmente, `~/.ssh/config.d/sshh.conf` (ver [Integración](#integración-con-ssh-scp-rsync-git)),
-  que se genera a partir de la base de datos: la fuente de verdad sigue siendo SQLite.
+## Environment variables
 
-## Variables de entorno
-
-| Variable | Efecto |
+| Variable | Effect |
 |---|---|
-| `SSHH_DEBUG=1` | muestra en stderr cómo se resuelve el destino y el comando exacto que se ejecuta |
-| `SSHH_NO_WIZARD=1` | no abre el wizard con destinos nuevos |
-| `SSHH_DB=<ruta>` | usa otra base de datos (útil para pruebas) |
-| `SSHH_SSH=<ruta>` | usa otro binario en lugar de `ssh` |
-| `SSHH_INCLUDE_FILE=<ruta>` | otra ruta para el fichero ssh_config generado (útil para pruebas) |
-| `VISUAL` / `EDITOR` | editor para `Ctrl-e` en el formulario |
+| `SSHH_DEBUG=1` | prints to stderr how the destination is resolved and the exact command that runs |
+| `SSHH_NO_WIZARD=1` | don't open the wizard for new destinations |
+| `SSHH_DB=<path>` | use another database (useful for testing) |
+| `SSHH_SSH=<path>` | use another binary instead of `ssh` |
+| `SSHH_INCLUDE_FILE=<path>` | another path for the generated ssh_config file (useful for testing) |
+| `VISUAL` / `EDITOR` | editor for `Ctrl-e` in the form |
 
-Para el portapapeles (`yy`) se usa `wl-copy` (Wayland) o `xclip` (X11) si están disponibles y, si
-no, la secuencia OSC 52, que soportan la mayoría de terminales y que también funciona por ssh.
+The clipboard (`yy`) uses `wl-copy` (Wayland) or `xclip` (X11) when available and otherwise the
+OSC 52 escape sequence, which most terminals support and which also works over ssh.
 
-## Desarrollo
+## Development
 
 ```sh
 cargo test
 cargo clippy --all-targets
 ```
 
-Probar sin conectar a ningún sitio: apunta `SSHH_SSH` a un script que imprima sus argumentos y usa
-una base de datos aparte.
+To test without connecting anywhere, point `SSHH_SSH` to something that prints its arguments and use
+a separate database. Set the variables per command, so they don't stay in your shell:
 
 ```sh
-export SSHH_DB=/tmp/prueba.db SSHH_SSH=echo SSHH_DEBUG=1
-cargo run -- add web deploy@10.0.0.5 -p 2222
-cargo run -- web uptime
+SSHH_DB=/tmp/test.db cargo run -- add web deploy@10.0.0.5 -p 2222
+SSHH_DB=/tmp/test.db SSHH_SSH=echo SSHH_DEBUG=1 cargo run -- web uptime
 ```
 
-El TUI se puede probar de forma automatizada con tmux:
+The TUI can be tested automatically with tmux:
 
 ```sh
 tmux new -d -s t -x 120 -y 30 target/debug/sshh
@@ -435,30 +435,30 @@ tmux send-keys -t t / w e b
 tmux capture-pane -p -t t
 ```
 
-### Estructura
+### Layout
 
-| Módulo | Responsabilidad |
+| Module | Responsibility |
 |---|---|
-| `src/main.rs` | punto de entrada: TUI, subcomando o modo wrapper |
-| `src/ssh_args.rs` | parser de la línea de comandos de OpenSSH |
-| `src/connect.rs` | modo wrapper: resolución del destino (`ssh -G`), wizard, `exec` de ssh |
-| `src/db.rs` | SQLite, migraciones (`PRAGMA user_version`), importación e historial |
-| `src/model.rs` | modelo de datos y validación |
-| `src/ssh_config.rs` | lectura de ficheros ssh_config (con `Include`) para importarlos |
-| `src/include.rs` | fichero ssh_config generado (`~/.ssh/config.d/sshh.conf`) |
-| `src/cli.rs` | subcomandos (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`) |
-| `src/tui/app.rs` | estado y manejo de eventos del TUI (sin terminal; testeable) |
-| `src/tui/form.rs` | formulario de alta, edición y wizard |
-| `src/tui/ui.rs` | renderizado |
-| `src/tui/term.rs` | terminal, `$EDITOR` y portapapeles |
+| `src/main.rs` | entry point: TUI, subcommand or wrapper mode |
+| `src/ssh_args.rs` | OpenSSH command line parser |
+| `src/connect.rs` | wrapper mode: destination resolution (`ssh -G`), wizard, `exec` of ssh |
+| `src/db.rs` | SQLite, migrations (`PRAGMA user_version`), imports and history |
+| `src/model.rs` | data model and validation |
+| `src/ssh_config.rs` | reads ssh_config files (with `Include`) to import them |
+| `src/include.rs` | generated ssh_config file (`~/.ssh/config.d/sshh.conf`) |
+| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`) |
+| `src/tui/app.rs` | TUI state and event handling (no terminal; testable) |
+| `src/tui/form.rs` | add/edit form and wizard |
+| `src/tui/ui.rs` | rendering |
+| `src/tui/term.rs` | terminal, `$EDITOR` and clipboard |
 
 ## Roadmap
 
-- [x] **Fase 1**: base de datos, migraciones, parser de argumentos de ssh y `exec`.
-- [x] **Fase 2**: TUI con lista, detalle, búsqueda fuzzy, filtro por tag y ratón.
-- [x] **Fase 3**: wizard de conexiones nuevas, alta, edición y borrado en el TUI, tags y copiar comando.
-- [x] **Fase 4**: historial, exportar/importar JSON, importar `~/.ssh/config`.
-- [x] **Fase 5**: fichero ssh_config generado para el `Include` y acciones rápidas (sftp, ssh-copy-id).
+- [x] **Phase 1**: database, migrations, ssh argument parser and `exec`.
+- [x] **Phase 2**: TUI with list, details, fuzzy search, tag filter and mouse.
+- [x] **Phase 3**: new connection wizard, add/edit/delete in the TUI, tags and copy command.
+- [x] **Phase 4**: history, JSON export/import, `~/.ssh/config` import.
+- [x] **Phase 5**: generated ssh_config file for `Include` and quick actions (sftp, ssh-copy-id).
 
-Ideas pendientes: «no volver a preguntar» por un destino en el wizard, `sshh add` sin argumentos
-abriendo el formulario, atajos configurables.
+Pending ideas: "don't ask again" for a destination in the wizard, `sshh add` without arguments
+opening the form, configurable shortcuts.

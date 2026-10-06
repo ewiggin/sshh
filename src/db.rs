@@ -1,4 +1,4 @@
-//! Almacenamiento en SQLite.
+//! SQLite storage.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::model::{Host, HostData};
 
-/// Migraciones en orden; `PRAGMA user_version` guarda cuántas se han aplicado.
+/// Migrations in order; `PRAGMA user_version` stores how many have been applied.
 const MIGRATIONS: &[&str] = &[r#"
 CREATE TABLE hosts (
     id            INTEGER PRIMARY KEY,
@@ -57,13 +57,13 @@ pub struct Db {
 }
 
 impl Db {
-    /// Ruta de la base de datos: `$SSHH_DB` o `~/.local/share/sshh/sshh.db`.
+    /// Database path: `$SSHH_DB` or `~/.local/share/sshh/sshh.db`.
     pub fn default_path() -> Result<PathBuf> {
         if let Some(path) = std::env::var_os("SSHH_DB") {
             return Ok(path.into());
         }
         let dirs = directories::ProjectDirs::from("", "", "sshh")
-            .ok_or_else(|| anyhow!("no se pudo determinar el directorio de datos"))?;
+            .ok_or_else(|| anyhow!("could not determine the data directory"))?;
         Ok(dirs.data_dir().join("sshh.db"))
     }
 
@@ -75,10 +75,10 @@ impl Db {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
             && !dir.exists()
         {
-            fs::create_dir_all(dir).with_context(|| format!("creando {}", dir.display()))?;
+            fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
             fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
         }
-        let conn = Connection::open(path).with_context(|| format!("abriendo {}", path.display()))?;
+        let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
         Self::init(conn)
     }
 
@@ -108,8 +108,8 @@ impl Db {
         Ok(())
     }
 
-    /// Importa varias conexiones en una sola transacción. Con `dry_run` se
-    /// hace todo igual pero se deshace al final.
+    /// Imports several connections in a single transaction. With `dry_run`
+    /// everything runs the same but is rolled back at the end.
     pub fn import_hosts(
         &mut self,
         hosts: &[HostData],
@@ -134,7 +134,7 @@ impl Db {
             }
             match on_conflict {
                 OnConflict::Skip => {
-                    report.skipped.push((data.alias.clone(), "ya existe con otros datos".into()));
+                    report.skipped.push((data.alias.clone(), "already exists with different data".into()));
                 }
                 OnConflict::Overwrite => {
                     update_in(&tx, existing.id, data)?;
@@ -161,8 +161,8 @@ impl Db {
         find_alias_in(&self.conn, alias)
     }
 
-    /// Busca una conexión guardada que apunte a `user@hostname:port`. Las
-    /// conexiones sin usuario se comparan con `local_user` (lo que usaría ssh).
+    /// Finds a saved connection pointing to `user@hostname:port`. Connections
+    /// without a user are compared against `local_user` (what ssh would use).
     pub fn find_by_target(
         &self,
         hostname: &str,
@@ -183,7 +183,7 @@ impl Db {
         host.map(|h| with_tags(&self.conn, h)).transpose()
     }
 
-    /// Todas las conexiones, las usadas más recientemente primero.
+    /// All connections, most recently used first.
     pub fn list_hosts(&self) -> Result<Vec<Host>> {
         let sql = format!("{HOST_SELECT} ORDER BY last_used DESC NULLS LAST, h.alias");
         let mut stmt = self.conn.prepare(&sql)?;
@@ -199,8 +199,7 @@ impl Db {
         Ok(())
     }
 
-    /// Últimas conexiones (de una conexión concreta o de todas), la más
-    /// reciente primero.
+    /// Latest connections (of one connection or of all), most recent first.
     pub fn history(&self, host_id: Option<i64>, limit: usize) -> Result<Vec<HistoryEntry>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT h.alias, hi.connected_at, hi.args
@@ -219,15 +218,15 @@ impl Db {
     }
 }
 
-/// Qué hacer al importar una conexión cuyo alias ya existe con otros datos.
+/// What to do when importing a connection whose alias already exists with different data.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum OnConflict {
-    /// No importarla
+    /// Don't import it
     #[default]
     Skip,
-    /// Reemplazar la existente
+    /// Replace the existing one
     Overwrite,
-    /// Importarla con otro alias (alias-2, alias-3…)
+    /// Import it under another alias (alias-2, alias-3…)
     Rename,
 }
 
@@ -236,9 +235,9 @@ pub struct ImportReport {
     pub added: Vec<String>,
     pub updated: Vec<String>,
     pub unchanged: Vec<String>,
-    /// (alias original, alias nuevo)
+    /// (original alias, new alias)
     pub renamed: Vec<(String, String)>,
-    /// (alias, motivo)
+    /// (alias, reason)
     pub skipped: Vec<(String, String)>,
 }
 
@@ -299,7 +298,7 @@ fn update_in(conn: &Connection, id: i64, data: &HostData) -> Result<()> {
         ],
     );
     if check_alias_conflict(updated, &data.alias)? == 0 {
-        bail!("la conexión ya no existe");
+        bail!("the connection no longer exists");
     }
     set_tags(conn, id, &data.tags)
 }
@@ -321,7 +320,7 @@ fn with_tags(conn: &Connection, mut host: Host) -> Result<Host> {
     Ok(host)
 }
 
-/// Compara ignorando el orden de los tags.
+/// Compares ignoring tag order.
 fn same_data(a: &HostData, b: &HostData) -> bool {
     let sorted = |d: &HostData| {
         let mut tags = d.tags.clone();
@@ -332,7 +331,7 @@ fn same_data(a: &HostData, b: &HostData) -> bool {
     sorted(a) == sorted(b)
 }
 
-/// Primer `alias-N` libre.
+/// First free `alias-N`.
 fn free_alias(conn: &Connection, alias: &str) -> Result<String> {
     for n in 2.. {
         let candidate = format!("{alias}-{n}");
@@ -343,12 +342,12 @@ fn free_alias(conn: &Connection, alias: &str) -> Result<String> {
     unreachable!()
 }
 
-/// Traduce la violación de `UNIQUE(alias)` a un error legible.
+/// Turns a `UNIQUE(alias)` violation into a readable error.
 fn check_alias_conflict(result: rusqlite::Result<usize>, alias: &str) -> Result<usize> {
     if let Err(rusqlite::Error::SqliteFailure(e, _)) = &result
         && e.code == rusqlite::ErrorCode::ConstraintViolation
     {
-        bail!("ya existe una conexión con el alias «{alias}»");
+        bail!("a connection with alias '{alias}' already exists");
     }
     Ok(result?)
 }
@@ -357,12 +356,12 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     let applied: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     let applied = usize::try_from(applied)?;
     if applied > MIGRATIONS.len() {
-        bail!("la base de datos es de una versión más reciente de sshh");
+        bail!("the database was created by a newer version of sshh");
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(applied) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)
-            .with_context(|| format!("aplicando la migración {}", i + 1))?;
+            .with_context(|| format!("applying migration {}", i + 1))?;
         tx.pragma_update(None, "user_version", i64::try_from(i + 1)?)?;
         tx.commit()?;
     }
@@ -469,7 +468,7 @@ mod tests {
         assert_eq!((host.id, host.data.tags), (a, vec!["x".to_string()]));
 
         let err = db.update_host(a, &HostData { alias: "b".into(), ..data.clone() }).unwrap_err();
-        assert!(err.to_string().contains("ya existe"));
+        assert!(err.to_string().contains("already exists"));
         assert!(db.update_host(999, &data).is_err());
     }
 
@@ -478,7 +477,7 @@ mod tests {
         let mut db = Db::open_in_memory().unwrap();
         db.insert_host(&sample("a")).unwrap();
         let err = db.insert_host(&sample("a")).unwrap_err();
-        assert!(err.to_string().contains("ya existe"));
+        assert!(err.to_string().contains("already exists"));
     }
 
     #[test]
@@ -502,7 +501,7 @@ mod tests {
         let changed = HostData { hostname: "otro".into(), ..sample("a") };
         let mut reordered = sample("a");
         reordered.tags.reverse();
-        let invalid = HostData { alias: "con espacio".into(), ..sample("") };
+        let invalid = HostData { alias: "with space".into(), ..sample("") };
         let batch = [changed.clone(), sample("b"), invalid];
 
         let r = db.import_hosts(&batch, OnConflict::Skip, false).unwrap();

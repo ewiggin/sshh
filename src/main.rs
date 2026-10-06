@@ -12,9 +12,9 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    // Rust ignora SIGPIPE por defecto y `println!` haría panic con
-    // `sshh ls | head`. Se restaura el comportamiento normal de Unix.
-    // SAFETY: se llama al arrancar, antes de crear hilos.
+    // Rust ignores SIGPIPE by default, so `println!` would panic on
+    // `sshh ls | head`. Restore the usual Unix behaviour.
+    // SAFETY: called at startup, before any thread is spawned.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
@@ -22,7 +22,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sshh: {e:#}");
-            // Mismo código que usa ssh para sus propios errores.
+            // Same exit code ssh uses for its own errors.
             ExitCode::from(255)
         }
     }
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
 fn run() -> anyhow::Result<()> {
     let raw: Vec<OsString> = std::env::args_os().skip(1).collect();
     let Some(args) = raw.iter().map(|a| a.to_str().map(String::from)).collect::<Option<Vec<_>>>() else {
-        // Argumentos que no son UTF-8: no los interpretamos, se los damos a ssh.
+        // Non UTF-8 arguments: don't interpret them, hand them to ssh.
         match connect::exec_ssh(&raw)? {}
     };
 

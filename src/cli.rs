@@ -1,4 +1,4 @@
-//! Subcomandos propios de sshh (`sshh ls`, `sshh add`, ...).
+//! sshh's own subcommands (`sshh ls`, `sshh add`, ...).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -20,10 +20,10 @@ use crate::ssh_config;
 #[command(
     name = "sshh",
     version,
-    about = "Gestor de conexiones SSH",
-    after_help = "Cualquier otro argumento se pasa a ssh: `sshh [opciones de ssh] destino [comando]`.\n\
-                  Sin argumentos abre el TUI.\n\
-                  Para conectar a un host que se llame como un subcomando usa `sshh -- <host>`."
+    about = "SSH connection manager",
+    after_help = "Any other arguments are passed to ssh: `sshh [ssh options] destination [command]`.\n\
+                  Without arguments it opens the TUI.\n\
+                  To connect to a host named like a subcommand use `sshh -- <host>`."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -32,42 +32,42 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Lista las conexiones guardadas
+    /// List saved connections
     Ls,
-    /// Guarda una conexión nueva
+    /// Save a new connection
     Add(AddArgs),
-    /// Elimina una conexión
+    /// Delete a connection
     Rm { alias: String },
-    /// Muestra las últimas conexiones (de todas o de un alias)
+    /// Show the latest connections (of all of them or of one alias)
     History {
         alias: Option<String>,
-        /// Número máximo de entradas
+        /// Maximum number of entries
         #[arg(short = 'n', long, default_value_t = 20)]
         limit: usize,
     },
-    /// Exporta las conexiones a JSON (sin historial)
+    /// Export connections to JSON (without history)
     Export {
-        /// Fichero de salida (por defecto, la salida estándar)
+        /// Output file (standard output by default)
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Importa conexiones desde un JSON generado con `sshh export` (`-` = stdin)
+    /// Import connections from a JSON file created by `sshh export` (`-` = stdin)
     Import {
         file: PathBuf,
         #[command(flatten)]
         opts: ImportOpts,
     },
-    /// Importa los bloques Host de ~/.ssh/config (y sus Include)
+    /// Import the Host blocks of ~/.ssh/config (and its Includes)
     ImportSshConfig {
-        /// Fichero ssh_config (por defecto ~/.ssh/config)
+        /// ssh_config file (~/.ssh/config by default)
         file: Option<PathBuf>,
-        /// Tags que añadir a las conexiones importadas, separados por comas
+        /// Tags to add to the imported connections, comma separated
         #[arg(short, long = "tag", value_delimiter = ',')]
         tags: Vec<String>,
         #[command(flatten)]
         opts: ImportOpts,
     },
-    /// Gestiona ~/.ssh/config.d/sshh.conf, para que ssh, scp, rsync o git conozcan tus alias
+    /// Manage ~/.ssh/config.d/sshh.conf, so ssh, scp, rsync or git know your aliases
     SshConfig {
         #[command(subcommand)]
         action: Option<SshConfigAction>,
@@ -76,21 +76,21 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SshConfigAction {
-    /// Muestra si está activado y si ~/.ssh/config lo incluye (por defecto)
+    /// Show whether it is enabled and whether ~/.ssh/config includes it (default)
     Status,
-    /// Genera el fichero y lo mantiene actualizado a partir de ahora
+    /// Generate the file and keep it up to date from now on
     Sync,
-    /// Imprime el contenido que se generaría
+    /// Print the content that would be generated
     Print,
-    /// Borra el fichero y deja de actualizarlo
+    /// Delete the file and stop updating it
     Disable,
 }
 
 #[derive(Args)]
 struct AddArgs {
-    /// Alias con el que se usará la conexión (`sshh <alias>`)
+    /// Alias used for the connection (`sshh <alias>`)
     alias: String,
-    /// Destino: [user@]host o ssh://[user@]host[:port]
+    /// Destination: [user@]host or ssh://[user@]host[:port]
     destination: String,
     #[arg(short, long)]
     port: Option<u16>,
@@ -99,7 +99,7 @@ struct AddArgs {
     /// ProxyJump
     #[arg(short = 'J', long)]
     jump: Option<String>,
-    /// Opción extra de ssh_config (Key=Value); se puede repetir
+    /// Extra ssh_config option (Key=Value); can be repeated
     #[arg(short = 'o', long = "option", value_parser = parse_option_arg)]
     options: Vec<SshOption>,
     #[arg(short, long)]
@@ -108,22 +108,22 @@ struct AddArgs {
     description: Option<String>,
     #[arg(long)]
     notes: Option<String>,
-    /// Tags separados por comas
+    /// Comma separated tags
     #[arg(short, long = "tag", value_delimiter = ',')]
     tags: Vec<String>,
 }
 
 #[derive(Args)]
 struct ImportOpts {
-    /// Qué hacer si ya existe una conexión con el mismo alias y otros datos
+    /// What to do when a connection with the same alias and different data exists
     #[arg(long, value_enum, default_value_t)]
     on_conflict: OnConflict,
-    /// Muestra qué se importaría sin guardar nada
+    /// Show what would be imported without saving anything
     #[arg(short = 'n', long)]
     dry_run: bool,
 }
 
-/// Formato de `sshh export`.
+/// `sshh export` format.
 #[derive(Serialize, Deserialize)]
 struct ExportFile {
     version: u32,
@@ -131,7 +131,7 @@ struct ExportFile {
     hosts: Vec<HostData>,
 }
 
-/// `sshh import` acepta el fichero de export o directamente una lista.
+/// `sshh import` accepts the export file or a plain list.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum ImportFile {
@@ -142,10 +142,10 @@ enum ImportFile {
 fn parse_option_arg(s: &str) -> Result<SshOption, String> {
     parse_option(s)
         .map(|(key, value)| SshOption { key, value })
-        .ok_or_else(|| format!("se esperaba Key=Value, no «{s}»"))
+        .ok_or_else(|| format!("expected Key=Value, got '{s}'"))
 }
 
-/// Indica si los argumentos son para sshh y no para ssh.
+/// Whether the arguments are meant for sshh rather than ssh.
 pub fn is_own_command(args: &[String]) -> bool {
     args.first().is_some_and(|a| {
         RESERVED_ALIASES.contains(&a.as_str()) || matches!(a.as_str(), "--help" | "--version")
@@ -160,10 +160,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::Rm { alias } => {
             let db = Db::open_default()?;
             if !db.delete_by_alias(&alias)? {
-                bail!("no existe ninguna conexión «{alias}»");
+                bail!("no connection named '{alias}'");
             }
             include::refresh_or_warn(&db);
-            println!("Conexión «{alias}» eliminada");
+            println!("Connection '{alias}' deleted");
             Ok(())
         }
         Command::History { alias, limit } => history(alias.as_deref(), limit),
@@ -181,24 +181,24 @@ fn ssh_config_cmd(action: SshConfigAction) -> Result<()> {
         SshConfigAction::Sync => {
             let db = Db::open_default()?;
             include::write(&db)?;
-            println!("{} conexiones escritas en {}", db.list_hosts()?.len(), path.display());
-            println!("Se actualizará automáticamente con cada cambio.");
+            println!("{} connections written to {}", db.list_hosts()?.len(), path.display());
+            println!("It will be updated automatically on every change.");
             print_include_state()?;
         }
         SshConfigAction::Disable => {
             if path.exists() {
-                fs::remove_file(&path).with_context(|| format!("borrando {}", path.display()))?;
-                println!("Borrado {}. Ya no se actualizará.", path.display());
-                println!("La línea `{INCLUDE_LINE}` de ~/.ssh/config puede quedarse: ssh ignora el fichero si no existe.");
+                fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
+                println!("Deleted {}. It will no longer be updated.", path.display());
+                println!("The `{INCLUDE_LINE}` line in ~/.ssh/config can stay: ssh ignores the file if it doesn't exist.");
             } else {
-                println!("No estaba activado.");
+                println!("It was not enabled.");
             }
         }
         SshConfigAction::Status => {
             if path.exists() {
-                println!("Activado: {}", path.display());
+                println!("Enabled: {}", path.display());
             } else {
-                println!("Desactivado. Actívalo con `sshh ssh-config sync`.");
+                println!("Disabled. Enable it with `sshh ssh-config sync`.");
             }
             print_include_state()?;
         }
@@ -208,14 +208,14 @@ fn ssh_config_cmd(action: SshConfigAction) -> Result<()> {
 
 fn print_include_state() -> Result<()> {
     match include::include_state()? {
-        IncludeState::Ok => println!("~/.ssh/config lo incluye correctamente."),
+        IncludeState::Ok => println!("~/.ssh/config includes it correctly."),
         IncludeState::Missing => {
-            println!("~/.ssh/config todavía no lo incluye. Añade esta línea al PRINCIPIO del fichero:");
+            println!("~/.ssh/config doesn't include it yet. Add this line at the TOP of the file:");
             println!("\n    {INCLUDE_LINE}\n");
         }
         IncludeState::Misplaced => {
-            println!("~/.ssh/config lo incluye, pero después de un bloque Host/Match, así que solo se");
-            println!("aplica dentro de ese bloque. Mueve la línea al PRINCIPIO del fichero:");
+            println!("~/.ssh/config includes it, but after a Host/Match block, so it only applies");
+            println!("inside that block. Move the line to the TOP of the file:");
             println!("\n    {INCLUDE_LINE}\n");
         }
     }
@@ -224,7 +224,7 @@ fn print_include_state() -> Result<()> {
 
 fn add(args: AddArgs) -> Result<()> {
     let Some(dest) = Destination::parse(&args.destination) else {
-        bail!("destino inválido «{}»", args.destination);
+        bail!("invalid destination '{}'", args.destination);
     };
     let data = HostData {
         alias: args.alias,
@@ -242,15 +242,15 @@ fn add(args: AddArgs) -> Result<()> {
     let mut db = Db::open_default()?;
     db.insert_host(&data)?;
     include::refresh_or_warn(&db);
-    println!("Conexión «{}» guardada", data.alias);
+    println!("Connection '{}' saved", data.alias);
     Ok(())
 }
 
 pub fn list() -> Result<()> {
     let hosts = Db::open_default()?.list_hosts()?;
     if hosts.is_empty() {
-        println!("No hay conexiones guardadas.");
-        println!("Añade una con `sshh add <alias> <destino>` o importa tu ~/.ssh/config con `sshh import-ssh-config`.");
+        println!("No saved connections.");
+        println!("Add one with `sshh add <alias> <destination>` or import your ~/.ssh/config with `sshh import-ssh-config`.");
         return Ok(());
     }
     let now = db::now();
@@ -261,10 +261,10 @@ pub fn list() -> Result<()> {
             d.target(),
             d.name.clone().unwrap_or_default(),
             d.tags.join(","),
-            h.last_used.map(|t| relative_time(now - t)).unwrap_or_else(|| "nunca".into()),
+            h.last_used.map(|t| relative_time(now - t)).unwrap_or_else(|| "never".into()),
         ]
     });
-    print_table(&["ALIAS", "DESTINO", "NOMBRE", "TAGS", "ÚLTIMO USO"], rows.collect());
+    print_table(&["ALIAS", "TARGET", "NAME", "TAGS", "LAST USED"], rows.collect());
     Ok(())
 }
 
@@ -273,20 +273,20 @@ fn history(alias: Option<&str>, limit: usize) -> Result<()> {
     let host_id = match alias {
         Some(alias) => match db.find_by_alias(alias)? {
             Some(host) => Some(host.id),
-            None => bail!("no existe ninguna conexión «{alias}»"),
+            None => bail!("no connection named '{alias}'"),
         },
         None => None,
     };
     let entries = db.history(host_id, limit)?;
     if entries.is_empty() {
-        println!("Todavía no hay conexiones en el historial.");
+        println!("No connections in the history yet.");
         return Ok(());
     }
     let rows = entries.iter().map(|e| {
         let args: Vec<String> = e.args.iter().map(|a| shell_quote(a)).collect();
         vec![format_date(e.connected_at), e.alias.clone(), format!("sshh {}", args.join(" "))]
     });
-    print_table(&["FECHA", "ALIAS", "COMANDO"], rows.collect());
+    print_table(&["DATE", "ALIAS", "COMMAND"], rows.collect());
     Ok(())
 }
 
@@ -302,16 +302,16 @@ fn export(output: Option<PathBuf>) -> Result<()> {
     match output {
         None => std::io::stdout().write_all(json.as_bytes())?,
         Some(path) => {
-            // Las notas pueden contener información sensible.
+            // Notes may contain sensitive information.
             fs::OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
                 .mode(0o600)
                 .open(&path)
-                .with_context(|| format!("creando {}", path.display()))?
+                .with_context(|| format!("creating {}", path.display()))?
                 .write_all(json.as_bytes())?;
-            eprintln!("{} conexiones exportadas a {}", file.hosts.len(), path.display());
+            eprintln!("{} connections exported to {}", file.hosts.len(), path.display());
         }
     }
     Ok(())
@@ -323,15 +323,15 @@ fn import(file: PathBuf, opts: ImportOpts) -> Result<()> {
         std::io::stdin().read_to_string(&mut text)?;
         text
     } else {
-        fs::read_to_string(&file).with_context(|| format!("leyendo {}", file.display()))?
+        fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?
     };
-    // Primero se valida la sintaxis (para que el error indique línea y columna).
-    let value: serde_json::Value = serde_json::from_str(&text).context("JSON inválido")?;
+    // Check the syntax first (so the error reports line and column).
+    let value: serde_json::Value = serde_json::from_str(&text).context("invalid JSON")?;
     let hosts = match serde_json::from_value(value) {
         Ok(ImportFile::Export { hosts } | ImportFile::List(hosts)) => hosts,
         Err(_) => bail!(
-            "el JSON no tiene el formato de `sshh export`: se espera {{\"hosts\": [...]}} \
-             o una lista de conexiones con al menos \"alias\" y \"hostname\""
+            "the JSON is not in `sshh export` format: expected {{\"hosts\": [...]}} \
+             or a list of connections with at least \"alias\" and \"hostname\""
         ),
     };
     let mut db = Db::open_default()?;
@@ -346,14 +346,14 @@ fn import(file: PathBuf, opts: ImportOpts) -> Result<()> {
 fn import_ssh_config(file: Option<PathBuf>, tags: Vec<String>, opts: ImportOpts) -> Result<()> {
     let path = match file.or_else(ssh_config::default_path) {
         Some(path) => path,
-        None => bail!("no se pudo determinar la ruta de ~/.ssh/config"),
+        None => bail!("could not determine the path of ~/.ssh/config"),
     };
     let mut parsed = ssh_config::parse_file(&path)?;
     for host in &mut parsed.hosts {
         host.tags.extend(tags.iter().cloned());
     }
     if parsed.hosts.is_empty() {
-        println!("No hay bloques Host importables en {}", path.display());
+        println!("No importable Host blocks in {}", path.display());
     } else {
         let mut db = Db::open_default()?;
         let report = db.import_hosts(&parsed.hosts, opts.on_conflict, opts.dry_run)?;
@@ -363,7 +363,7 @@ fn import_ssh_config(file: Option<PathBuf>, tags: Vec<String>, opts: ImportOpts)
         print_report(&report, opts.dry_run);
     }
     if !parsed.ignored.is_empty() {
-        println!("\nNo importados (ssh los sigue aplicando igualmente):");
+        println!("\nNot imported (ssh still applies them anyway):");
         for ignored in &parsed.ignored {
             println!("  · {} ({})", ignored.pattern, ignored.reason);
         }
@@ -373,19 +373,19 @@ fn import_ssh_config(file: Option<PathBuf>, tags: Vec<String>, opts: ImportOpts)
 
 fn print_report(r: &ImportReport, dry_run: bool) {
     let counts = [
-        (r.added.len(), "nueva", "nuevas"),
-        (r.updated.len(), "actualizada", "actualizadas"),
-        (r.renamed.len(), "renombrada", "renombradas"),
-        (r.unchanged.len(), "sin cambios", "sin cambios"),
-        (r.skipped.len(), "omitida", "omitidas"),
+        (r.added.len(), "new"),
+        (r.updated.len(), "updated"),
+        (r.renamed.len(), "renamed"),
+        (r.unchanged.len(), "unchanged"),
+        (r.skipped.len(), "skipped"),
     ];
     let summary: Vec<String> = counts
         .iter()
-        .filter(|(n, ..)| *n > 0)
-        .map(|(n, one, many)| format!("{n} {}", if *n == 1 { one } else { many }))
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, label)| format!("{n} {label}"))
         .collect();
     if summary.is_empty() {
-        println!("No había nada que importar.");
+        println!("Nothing to import.");
         return;
     }
     println!("{}", summary.join(", "));
@@ -396,16 +396,16 @@ fn print_report(r: &ImportReport, dry_run: bool) {
         println!("  ~ {alias}");
     }
     for (from, to) in &r.renamed {
-        println!("  + {to} (renombrada desde «{from}»)");
+        println!("  + {to} (renamed from '{from}')");
     }
     for (alias, reason) in &r.skipped {
         println!("  ! {alias}: {reason}");
     }
-    if r.skipped.iter().any(|(_, reason)| reason.starts_with("ya existe")) {
-        println!("Usa --on-conflict overwrite|rename para importar las que ya existen.");
+    if r.skipped.iter().any(|(_, reason)| reason.starts_with("already exists")) {
+        println!("Use --on-conflict overwrite|rename to import the existing ones.");
     }
     if dry_run {
-        println!("(simulación: no se ha guardado nada)");
+        println!("(dry run: nothing was saved)");
     }
 }
 
@@ -429,14 +429,14 @@ fn print_table(header: &[&str], rows: Vec<Vec<String>>) {
 
 pub fn relative_time(secs: i64) -> String {
     match secs {
-        ..60 => "ahora".into(),
-        60..3600 => format!("hace {} min", secs / 60),
-        3600..86400 => format!("hace {} h", secs / 3600),
-        _ => format!("hace {} d", secs / 86400),
+        ..60 => "now".into(),
+        60..3600 => format!("{} min ago", secs / 60),
+        3600..86400 => format!("{} h ago", secs / 3600),
+        _ => format!("{} d ago", secs / 86400),
     }
 }
 
-/// Fecha local `AAAA-MM-DD HH:MM`.
+/// Local date `YYYY-MM-DD HH:MM`.
 pub fn format_date(timestamp: i64) -> String {
     use chrono::TimeZone;
     chrono::Local

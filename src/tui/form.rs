@@ -1,4 +1,4 @@
-//! Formulario de conexión: alta, edición y wizard de conexiones nuevas.
+//! Connection form: add, edit and the wizard for new connections.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -23,26 +23,26 @@ pub const TAGS: usize = 8;
 pub const OPTIONS: usize = 9;
 pub const NOTES: usize = 10;
 
-/// (etiqueta, pista cuando está vacío, líneas; >1 = multilínea)
+/// (label, hint when empty, lines; >1 = multiline)
 const FIELDS: [(&str, &str, u16); 11] = [
-    ("Alias", "nombre corto para usar con: sshh <alias>", 1),
-    ("Host", "hostname o IP", 1),
-    ("Usuario", "", 1),
-    ("Puerto", "22 por defecto", 1),
-    ("Identidad", "p. ej. ~/.ssh/id_ed25519", 1),
-    ("ProxyJump", "p. ej. bastion o user@host:port", 1),
-    ("Nombre", "", 1),
-    ("Descripción", "", 1),
-    ("Tags", "p. ej. prod, web", 1),
-    ("Opciones", "una por línea, p. ej. ForwardAgent=yes", 3),
-    ("Notas", "Ctrl-e abre $EDITOR", 5),
+    ("Alias", "short name to use with: sshh <alias>", 1),
+    ("Host", "hostname or IP", 1),
+    ("User", "", 1),
+    ("Port", "22 by default", 1),
+    ("Identity", "e.g. ~/.ssh/id_ed25519", 1),
+    ("ProxyJump", "e.g. bastion or user@host:port", 1),
+    ("Name", "", 1),
+    ("Description", "", 1),
+    ("Tags", "e.g. prod, web", 1),
+    ("Options", "one per line, e.g. ForwardAgent=yes", 3),
+    ("Notes", "Ctrl-e opens $EDITOR", 5),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
     Add,
     Edit(i64),
-    /// Conexión nueva detectada al usar `sshh destino`.
+    /// New connection detected when running `sshh destination`.
     Wizard,
 }
 
@@ -51,14 +51,14 @@ pub enum FormEvent {
     None,
     Submit,
     Cancel,
-    /// Editar el campo multilínea enfocado con $EDITOR.
+    /// Edit the focused multiline field with $EDITOR.
     Editor,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Field {
     pub value: String,
-    /// Posición del cursor en chars.
+    /// Cursor position in chars.
     pub cursor: usize,
 }
 
@@ -75,7 +75,7 @@ impl Field {
             .map_or(self.value.len(), |(b, _)| b)
     }
 
-    /// (línea, columna) del cursor.
+    /// Cursor (line, column).
     fn line_col(&self) -> (usize, usize) {
         let before: String = self.value.chars().take(self.cursor).collect();
         let line = before.matches('\n').count();
@@ -83,7 +83,7 @@ impl Field {
         (line, col)
     }
 
-    /// Mueve el cursor a (línea, columna), ajustando la columna a la línea.
+    /// Moves the cursor to (line, column), clamping the column to the line.
     fn set_line_col(&mut self, line: usize, col: usize) {
         let mut cursor = 0;
         for (i, l) in self.value.split('\n').enumerate() {
@@ -136,7 +136,7 @@ pub struct Form {
     pub fields: Vec<Field>,
     pub focus: usize,
     pub error: Option<String>,
-    /// Zonas de los campos en el último render (para el ratón).
+    /// Field areas from the last render (for the mouse).
     areas: Vec<Rect>,
 }
 
@@ -172,8 +172,8 @@ impl Form {
         FIELDS[field].2 > 1
     }
 
-    /// Convierte el formulario en datos validados. En caso de error enfoca el
-    /// campo culpable y guarda el mensaje.
+    /// Turns the form into validated data. On error it focuses the offending
+    /// field and stores the message.
     pub fn submit(&mut self) -> Option<HostData> {
         match self.build() {
             Ok(data) => {
@@ -196,13 +196,13 @@ impl Form {
         validate_alias(&alias).map_err(|e| (ALIAS, e.to_string()))?;
         let hostname = text(HOSTNAME);
         if hostname.is_empty() || hostname.chars().any(char::is_whitespace) {
-            return Err((HOSTNAME, "el host no puede estar vacío ni tener espacios".into()));
+            return Err((HOSTNAME, "host cannot be empty or contain spaces".into()));
         }
         let port = match optional(PORT) {
             None => None,
             Some(p) => match p.parse::<u16>() {
                 Ok(n) if n > 0 => Some(n),
-                _ => return Err((PORT, format!("puerto inválido «{p}»"))),
+                _ => return Err((PORT, format!("invalid port '{p}'"))),
             },
         };
         let tags = text(TAGS)
@@ -214,7 +214,7 @@ impl Form {
         let mut extra_options = Vec::new();
         for line in self.fields[OPTIONS].value.lines().map(str::trim).filter(|l| !l.is_empty()) {
             let (key, value) = parse_option(line)
-                .ok_or_else(|| (OPTIONS, format!("se esperaba Clave=Valor, no «{line}»")))?;
+                .ok_or_else(|| (OPTIONS, format!("expected Key=Value, got '{line}'")))?;
             extra_options.push(SshOption { key, value });
         }
         let notes = self.fields[NOTES].value.trim_end().to_string();
@@ -291,7 +291,7 @@ impl Form {
         FormEvent::None
     }
 
-    /// Click: enfoca el campo bajo el ratón.
+    /// Click: focuses the field under the mouse.
     pub fn on_click(&mut self, pos: Position) {
         if let Some(i) = self.areas.iter().position(|a| a.contains(pos)) {
             self.focus = i;
@@ -301,23 +301,23 @@ impl Form {
 
     fn title(&self) -> String {
         match self.kind {
-            FormKind::Add => "Nueva conexión".into(),
-            FormKind::Edit(_) => format!("Editar «{}»", self.fields[ALIAS].value),
-            FormKind::Wizard => "Conexión nueva · ¿guardarla?".into(),
+            FormKind::Add => "New connection".into(),
+            FormKind::Edit(_) => format!("Edit '{}'", self.fields[ALIAS].value),
+            FormKind::Wizard => "New connection · save it?".into(),
         }
     }
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
         let mut hints = vec![];
         if Self::is_multiline(self.focus) {
-            hints.extend([("Ctrl-s", "guardar"), ("Ctrl-e", "$EDITOR")]);
+            hints.extend([("Ctrl-s", "save"), ("Ctrl-e", "$EDITOR")]);
         } else {
-            hints.push(("Enter", "guardar"));
+            hints.push(("Enter", "save"));
         }
-        hints.push(("Tab/↑↓", "campo"));
+        hints.push(("Tab/↑↓", "field"));
         hints.push(match self.kind {
-            FormKind::Wizard => ("Esc", "conectar sin guardar"),
-            _ => ("Esc", "cancelar"),
+            FormKind::Wizard => ("Esc", "connect without saving"),
+            _ => ("Esc", "cancel"),
         });
         hints
     }
@@ -413,7 +413,7 @@ mod tests {
             port: Some(2222),
             tags: vec!["a".into(), "b".into()],
             extra_options: vec![SshOption { key: "ForwardAgent".into(), value: "yes".into() }],
-            notes: Some("línea 1\nlínea 2".into()),
+            notes: Some("line 1\nline 2 → café".into()),
             ..Default::default()
         };
         let mut form = Form::new(FormKind::Add, &data);
@@ -446,17 +446,17 @@ mod tests {
     #[test]
     fn editing_keys() {
         let mut form = Form::new(FormKind::Add, &HostData::default());
-        type_str(&mut form, "hola mundo");
+        type_str(&mut form, "hello world");
         form.on_key(ctrl('w'));
-        assert_eq!(form.focused().value, "hola ");
+        assert_eq!(form.focused().value, "hello ");
         form.on_key(key(KeyCode::Home));
-        type_str(&mut form, "¡");
+        type_str(&mut form, "→");
         form.on_key(key(KeyCode::End));
         form.on_key(key(KeyCode::Backspace));
-        assert_eq!(form.focused().value, "¡hola");
+        assert_eq!(form.focused().value, "→hello");
         form.on_key(key(KeyCode::Left));
         form.on_key(key(KeyCode::Delete));
-        assert_eq!(form.focused().value, "¡hol");
+        assert_eq!(form.focused().value, "→hell");
     }
 
     #[test]

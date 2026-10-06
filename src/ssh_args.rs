@@ -1,16 +1,16 @@
-//! Parser de la línea de comandos de OpenSSH.
+//! OpenSSH command line parser.
 //!
-//! Solo extrae lo que sshh necesita (destino, usuario, puerto, identidades,
-//! salto y opciones `-o`). Los argumentos originales se pasan a `ssh` intactos.
+//! Only extracts what sshh needs (destination, user, port, identities, jump
+//! host and `-o` options). The original arguments are passed to `ssh` untouched.
 
 use std::fmt;
 
-/// Flags de `ssh` que consumen un argumento.
+/// `ssh` flags that take an argument.
 const FLAGS_WITH_ARG: &str = "BbcDEeFIiJLlmOoPpQRSWw";
-/// Flags de `ssh` sin argumento.
+/// `ssh` flags without an argument.
 const FLAGS_NO_ARG: &str = "46AaCfGgKkMNnqsTtVvXxYy";
 
-/// Destino de una conexión: `[user@]host` o `ssh://[user@]host[:port]`.
+/// Connection destination: `[user@]host` or `ssh://[user@]host[:port]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Destination {
     pub user: Option<String>,
@@ -64,7 +64,7 @@ impl fmt::Display for Destination {
     }
 }
 
-/// Separa `host[:port]` o `[ipv6][:port]` dentro de una URI ssh://.
+/// Splits `host[:port]` or `[ipv6][:port]` inside an ssh:// URI.
 fn split_host_port(s: &str) -> Option<(&str, Option<u16>)> {
     if let Some(rest) = s.strip_prefix('[') {
         let (host, after) = rest.split_once(']')?;
@@ -81,7 +81,7 @@ fn split_host_port(s: &str) -> Option<(&str, Option<u16>)> {
     }
 }
 
-/// Separa una opción `-o` en clave y valor (`Key=Value` o `Key Value`).
+/// Splits a `-o` option into key and value (`Key=Value` or `Key Value`).
 pub fn parse_option(s: &str) -> Option<(String, String)> {
     let s = s.trim();
     let split = s.find(|c: char| c == '=' || c.is_whitespace())?;
@@ -108,27 +108,27 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownFlag(c) => write!(f, "flag desconocido -{c}"),
-            Self::MissingValue(c) => write!(f, "falta el valor de -{c}"),
-            Self::InvalidPort(p) => write!(f, "puerto inválido «{p}»"),
-            Self::InvalidDestination(d) => write!(f, "destino inválido «{d}»"),
+            Self::UnknownFlag(c) => write!(f, "unknown flag -{c}"),
+            Self::MissingValue(c) => write!(f, "missing value for -{c}"),
+            Self::InvalidPort(p) => write!(f, "invalid port '{p}'"),
+            Self::InvalidDestination(d) => write!(f, "invalid destination '{d}'"),
         }
     }
 }
 
 impl std::error::Error for ParseError {}
 
-/// Resultado de analizar los argumentos de una llamada a `ssh`.
+/// Result of parsing the arguments of an `ssh` call.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SshInvocation {
-    /// Destino y su posición en la lista de argumentos.
+    /// Destination and its position in the argument list.
     pub destination: Option<(usize, Destination)>,
     pub login: Option<String>,
     pub port: Option<u16>,
     pub identities: Vec<String>,
     pub jump: Option<String>,
     pub options: Vec<(String, String)>,
-    /// La llamada no abre una sesión (`-G`, `-V`, `-O`, `-Q`): solo consulta.
+    /// The call doesn't open a session (`-G`, `-V`, `-O`, `-Q`): it only queries.
     pub info_only: bool,
 }
 
@@ -156,7 +156,7 @@ impl SshInvocation {
             .or_else(|| self.option("Port").and_then(|p| p.parse().ok()))
     }
 
-    /// Indica si el usuario ya fijó la opción `key` en la línea de comandos.
+    /// Whether the user already set option `key` on the command line.
     pub fn sets(&self, key: &str) -> bool {
         match key.to_ascii_lowercase().as_str() {
             "user" => self.effective_user().is_some(),
@@ -187,8 +187,8 @@ impl SshInvocation {
     }
 }
 
-/// Analiza los argumentos igual que `ssh`: opciones, destino, más opciones y
-/// después el comando remoto (a partir del primer argumento que no es opción).
+/// Parses the arguments like `ssh` does: options, destination, more options
+/// and then the remote command (from the first argument that isn't an option).
 pub fn parse(args: &[String]) -> Result<SshInvocation, ParseError> {
     let mut inv = SshInvocation::default();
     let mut i = 0;
@@ -227,7 +227,7 @@ pub fn parse(args: &[String]) -> Result<SshInvocation, ParseError> {
             continue;
         }
         if inv.destination.is_some() {
-            // Empieza el comando remoto.
+            // The remote command starts here.
             break;
         }
         inv.set_destination(i, arg)?;

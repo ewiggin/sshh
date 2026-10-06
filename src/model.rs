@@ -1,14 +1,14 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-/// Opción adicional de ssh_config (`Key Value`) asociada a una conexión.
+/// Extra ssh_config option (`Key Value`) attached to a connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshOption {
     pub key: String,
     pub value: String,
 }
 
-/// Datos editables de una conexión. Es también el formato de import/export.
+/// Editable data of a connection. Also the import/export format.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HostData {
@@ -38,15 +38,15 @@ impl HostData {
     pub fn validate(&self) -> Result<()> {
         validate_alias(&self.alias)?;
         if self.hostname.is_empty() || self.hostname.chars().any(char::is_whitespace) {
-            bail!("hostname inválido «{}»", self.hostname);
+            bail!("invalid hostname '{}'", self.hostname);
         }
         if self.port == Some(0) {
-            bail!("el puerto no puede ser 0");
+            bail!("port cannot be 0");
         }
         Ok(())
     }
 
-    /// Destino legible: `user@hostname:port`.
+    /// Human readable target: `user@hostname:port`.
     pub fn target(&self) -> String {
         let mut s = String::new();
         if let Some(user) = &self.user {
@@ -60,7 +60,7 @@ impl HostData {
         s
     }
 
-    /// Opciones de ssh_config que describen la conexión, en orden.
+    /// ssh_config options describing the connection, in order.
     pub fn ssh_options(&self) -> Vec<(String, String)> {
         let mut opts = vec![("HostName".to_string(), self.hostname.clone())];
         let fields = [
@@ -83,9 +83,9 @@ impl HostData {
     }
 }
 
-/// Opciones de ssh_config cuyo valor es un único argumento (rutas, nombres).
-/// Las demás pueden tener varios (`LocalForward 8080 localhost:80`) y no se
-/// deben entrecomillar.
+/// ssh_config options whose value is a single argument (paths, names).
+/// Others may take several (`LocalForward 8080 localhost:80`) and must not
+/// be quoted.
 const SINGLE_VALUE_OPTIONS: &[&str] = &[
     "hostname",
     "user",
@@ -98,7 +98,7 @@ const SINGLE_VALUE_OPTIONS: &[&str] = &[
     "xauthlocation",
 ];
 
-/// Valor de una opción tal como debe escribirse en ssh_config o en `-o`.
+/// Option value as it must be written in ssh_config or in `-o`.
 pub fn config_value(key: &str, value: &str) -> String {
     let single = SINGLE_VALUE_OPTIONS.contains(&key.to_ascii_lowercase().as_str());
     if single && value.chars().any(char::is_whitespace) && !value.starts_with('"') {
@@ -108,7 +108,7 @@ pub fn config_value(key: &str, value: &str) -> String {
     }
 }
 
-/// Conexión guardada en la base de datos.
+/// Connection stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Host {
     pub id: i64,
@@ -119,25 +119,25 @@ pub struct Host {
     pub use_count: i64,
 }
 
-/// Subcomandos propios de sshh; no pueden usarse como alias.
+/// sshh's own subcommands; they cannot be used as aliases.
 pub const RESERVED_ALIASES: &[&str] =
     &["ls", "add", "rm", "help", "history", "export", "import", "import-ssh-config", "ssh-config"];
 
 pub fn validate_alias(alias: &str) -> Result<()> {
     if alias.is_empty() {
-        bail!("el alias no puede estar vacío");
+        bail!("alias cannot be empty");
     }
     if alias.starts_with('-') {
-        bail!("el alias no puede empezar por «-»");
+        bail!("alias cannot start with '-'");
     }
     if let Some(c) = alias
         .chars()
         .find(|c| c.is_whitespace() || matches!(c, '*' | '?' | '!' | ',' | '@' | '"' | '#'))
     {
-        bail!("el alias no puede contener «{c}»");
+        bail!("alias cannot contain '{c}'");
     }
     if RESERVED_ALIASES.contains(&alias) {
-        bail!("«{alias}» es un subcomando de sshh");
+        bail!("'{alias}' is an sshh subcommand");
     }
     Ok(())
 }

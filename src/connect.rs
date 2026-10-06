@@ -1,8 +1,8 @@
-//! Modo wrapper: `sshh [argumentos de ssh]`.
+//! Wrapper mode: `sshh [ssh arguments]`.
 //!
-//! Siempre termina ejecutando el `ssh` del sistema con `exec`. sshh nunca debe
-//! impedir una conexión: si algo falla (parser, base de datos) se avisa y se
-//! pasan los argumentos tal cual.
+//! Always ends up running the system `ssh` with `exec`. sshh must never get in
+//! the way of a connection: if something fails (parser, database) it warns and
+//! passes the arguments through unchanged.
 
 use std::convert::Infallible;
 use std::ffi::OsStr;
@@ -19,16 +19,16 @@ use crate::model::{Host, HostData, config_value, validate_alias};
 use crate::ssh_args::{self, Destination, SshInvocation};
 use crate::tui::{self, WizardOutcome};
 
-/// Cómo se ha identificado el destino respecto a la base de datos.
+/// How the destination was matched against the database.
 enum Resolution {
-    /// El destino es el alias de una conexión guardada.
+    /// The destination is the alias of a saved connection.
     Alias(Host),
-    /// El destino coincide con `user@hostname:port` de una conexión guardada.
+    /// The destination matches `user@hostname:port` of a saved connection.
     Target(Host),
     Unknown(Target),
 }
 
-/// A dónde conectaría ssh realmente (según `ssh -G`, que aplica ssh_config).
+/// Where ssh would really connect (per `ssh -G`, which applies ssh_config).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Target {
     hostname: String,
@@ -41,27 +41,27 @@ pub fn run(args: Vec<String>) -> Result<Infallible> {
     let inv = match ssh_args::parse(&args) {
         Ok(inv) => inv,
         Err(e) => {
-            debug(format_args!("no se entienden los argumentos ({e}); se pasan tal cual"));
+            debug(format_args!("could not parse the arguments ({e}); passing them through"));
             return exec_ssh(&args);
         }
     };
     let Some((dest_index, dest)) = &inv.destination else {
-        debug(format_args!("sin destino; se pasan los argumentos tal cual"));
+        debug(format_args!("no destination; passing the arguments through"));
         return exec_ssh(&args);
     };
     let final_args = match prepare(&args, &inv, *dest_index, dest) {
         Ok(Some(final_args)) => final_args,
         Ok(None) => std::process::exit(130),
         Err(e) => {
-            eprintln!("sshh: {e:#}; se ejecuta ssh directamente");
+            eprintln!("sshh: {e:#}; running ssh directly");
             args
         }
     };
     exec_ssh(&final_args)
 }
 
-/// Resuelve el destino, registra la conexión y devuelve los argumentos para
-/// ssh, o `None` si el usuario canceló en el wizard.
+/// Resolves the destination, records the connection and returns the arguments
+/// for ssh, or `None` if the user cancelled in the wizard.
 fn prepare(
     args: &[String],
     inv: &SshInvocation,
@@ -71,15 +71,15 @@ fn prepare(
     let mut db = Db::open_default()?;
     let (host_id, final_args) = match resolve(&db, args, inv, dest)? {
         Resolution::Alias(host) => {
-            debug(format_args!("«{}» es el alias de una conexión guardada", dest.host));
+            debug(format_args!("'{}' is the alias of a saved connection", dest.host));
             (host.id, alias_args(args, dest_index, inv, &host))
         }
         Resolution::Target(host) => {
-            debug(format_args!("«{dest}» coincide con la conexión «{}»", host.data.alias));
+            debug(format_args!("'{dest}' matches saved connection '{}'", host.data.alias));
             (host.id, args.to_vec())
         }
         Resolution::Unknown(target) => {
-            debug(format_args!("«{dest}» no está guardado ({target:?})"));
+            debug(format_args!("'{dest}' is not saved ({target:?})"));
             if inv.info_only || !wizard_enabled() {
                 return Ok(Some(args.to_vec()));
             }
@@ -97,7 +97,7 @@ fn prepare(
     if !inv.info_only
         && let Err(e) = db.record_connection(host_id, args)
     {
-        eprintln!("sshh: no se pudo guardar el historial: {e:#}");
+        eprintln!("sshh: could not save history: {e:#}");
     }
     Ok(Some(final_args))
 }
@@ -114,7 +114,7 @@ fn resolve(db: &Db, args: &[String], inv: &SshInvocation, dest: &Destination) ->
     })
 }
 
-/// El wizard solo aparece en sesiones interactivas y se puede desactivar con
+/// The wizard only shows up in interactive sessions and can be disabled with
 /// `SSHH_NO_WIZARD=1`.
 fn wizard_enabled() -> bool {
     let off = env::var_os("SSHH_NO_WIZARD").is_some_and(|v| !v.is_empty() && v != "0");
@@ -127,8 +127,8 @@ fn local_user() -> String {
     env::var("USER").or_else(|_| env::var("LOGNAME")).unwrap_or_default()
 }
 
-/// Pregunta a `ssh -G` el destino efectivo; si falla, usa lo que hay en los
-/// argumentos.
+/// Asks `ssh -G` for the effective destination; if that fails, uses what is in
+/// the arguments.
 fn resolve_target(args: &[String], inv: &SshInvocation, dest: &Destination) -> Target {
     let from_ssh = find_ssh().ok().and_then(|bin| {
         let out = Command::new(bin)
@@ -164,7 +164,7 @@ fn parse_ssh_g(output: &str) -> Option<Target> {
     })
 }
 
-/// Datos iniciales del wizard a partir de lo que se ha escrito y de ssh -G.
+/// Initial wizard data from what was typed and from ssh -G.
 fn prefill(dest: &Destination, inv: &SshInvocation, target: &Target) -> HostData {
     let explicit_user = inv.effective_user().is_some() || target.user != local_user();
     HostData {
@@ -178,7 +178,7 @@ fn prefill(dest: &Destination, inv: &SshInvocation, target: &Target) -> HostData
     }
 }
 
-/// `web.example.com` → `web`; las IPs y los alias de ssh_config se quedan igual.
+/// `web.example.com` → `web`; IPs and ssh_config aliases stay as they are.
 fn suggest_alias(host: &str) -> String {
     let alias = if host.parse::<std::net::IpAddr>().is_ok() {
         host
@@ -188,13 +188,13 @@ fn suggest_alias(host: &str) -> String {
     if validate_alias(alias).is_ok() { alias.to_string() } else { String::new() }
 }
 
-/// Argumentos para otra herramienta de OpenSSH (sftp, ssh-copy-id…) que
-/// acepta `-o`: las opciones de la conexión seguidas del alias.
+/// Arguments for another OpenSSH tool that accepts `-o` (sftp, ssh-copy-id…):
+/// the connection options followed by the alias.
 pub fn tool_args(host: &Host) -> Vec<String> {
     alias_args(std::slice::from_ref(&host.data.alias), 0, &SshInvocation::default(), host)
 }
 
-/// Comando ssh equivalente a una conexión, para copiarlo y usarlo fuera de sshh.
+/// ssh command equivalent to a connection, to copy it and use it outside sshh.
 pub fn ssh_command(d: &HostData) -> String {
     let mut parts = vec!["ssh".to_string()];
     let flags = [
@@ -217,9 +217,9 @@ pub fn ssh_command(d: &HostData) -> String {
     parts.iter().map(|p| shell_quote(p)).collect::<Vec<_>>().join(" ")
 }
 
-/// Inserta antes del destino un `-o Key=Value` por cada opción de la conexión
-/// que el usuario no haya fijado ya. El destino sigue siendo el alias para que
-/// los bloques `Host alias` de ssh_config también se apliquen.
+/// Inserts a `-o Key=Value` before the destination for every connection option
+/// the user hasn't already set. The destination stays the alias so that
+/// `Host alias` blocks in ssh_config still apply.
 fn alias_args(args: &[String], dest_index: usize, inv: &SshInvocation, host: &Host) -> Vec<String> {
     let at = if dest_index > 0 && args[dest_index - 1] == "--" {
         dest_index - 1
@@ -237,7 +237,7 @@ fn alias_args(args: &[String], dest_index: usize, inv: &SshInvocation, host: &Ho
     out
 }
 
-/// Reemplaza el proceso actual por `ssh`.
+/// Replaces the current process with `ssh`.
 pub fn exec_ssh<S: AsRef<OsStr>>(args: &[S]) -> Result<Infallible> {
     let bin = find_ssh()?;
     if debug_enabled() {
@@ -248,10 +248,10 @@ pub fn exec_ssh<S: AsRef<OsStr>>(args: &[S]) -> Result<Infallible> {
         debug(format_args!("exec {}", cmd.join(" ")));
     }
     let err = Command::new(&bin).args(args).exec();
-    Err(anyhow!(err).context(format!("no se pudo ejecutar {}", bin.display())))
+    Err(anyhow!(err).context(format!("could not run {}", bin.display())))
 }
 
-/// `SSHH_DEBUG=1` muestra en stderr cómo se resuelve el destino y el comando final.
+/// `SSHH_DEBUG=1` prints to stderr how the destination is resolved and the final command.
 fn debug_enabled() -> bool {
     env::var_os("SSHH_DEBUG").is_some_and(|v| !v.is_empty() && v != "0")
 }
@@ -262,7 +262,7 @@ fn debug(msg: std::fmt::Arguments) {
     }
 }
 
-/// Representa un argumento como se escribiría en la shell (solo para mostrarlo).
+/// Renders an argument the way it would be typed in a shell (display only).
 pub fn shell_quote(arg: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "@%+=:,./_-~".contains(c);
     if !arg.is_empty() && arg.chars().all(safe) {
@@ -272,18 +272,18 @@ pub fn shell_quote(arg: &str) -> String {
     }
 }
 
-/// Localiza el binario de ssh: `$SSHH_SSH` o el primer `ssh` del PATH que no
-/// sea este mismo ejecutable (por si se instala sshh con el nombre `ssh`).
+/// Finds the ssh binary: `$SSHH_SSH` or the first `ssh` in PATH that isn't this
+/// very executable (in case sshh is installed under the name `ssh`).
 fn find_ssh() -> Result<PathBuf> {
     if let Some(bin) = env::var_os("SSHH_SSH") {
         return Ok(bin.into());
     }
     let me = env::current_exe().and_then(fs::canonicalize).ok();
-    let path = env::var_os("PATH").context("PATH no está definido")?;
+    let path = env::var_os("PATH").context("PATH is not set")?;
     env::split_paths(&path)
         .map(|dir| dir.join("ssh"))
         .find(|c| c.is_file() && fs::canonicalize(c).ok() != me)
-        .ok_or_else(|| anyhow!("no se encontró `ssh` en el PATH"))
+        .ok_or_else(|| anyhow!("`ssh` not found in PATH"))
 }
 
 #[cfg(test)]

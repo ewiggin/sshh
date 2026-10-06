@@ -1,4 +1,4 @@
-//! Renderizado del TUI.
+//! TUI rendering.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
@@ -59,11 +59,11 @@ fn draw_search(frame: &mut Frame, app: &mut App, area: Rect) {
     app.search_area = area;
     let searching = matches!(app.mode, Mode::Search);
     let content = if app.query.is_empty() && !searching {
-        Line::from("/ para buscar · #tag filtra por tag".dim())
+        Line::from("/ to search · #tag filters by tag".dim())
     } else {
         Line::from(app.query.as_str())
     };
-    let block = block("Buscar", searching);
+    let block = block("Search", searching);
     let inner = block.inner(area);
     frame.render_widget(Paragraph::new(content).block(block), area);
     if searching {
@@ -72,7 +72,7 @@ fn draw_search(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Texto con los chars de `positions` resaltados.
+/// Text with the chars at `positions` highlighted.
 fn highlighted<'a>(text: &'a str, positions: &[usize]) -> Line<'a> {
     if positions.is_empty() {
         return Line::from(text);
@@ -90,18 +90,18 @@ fn highlighted<'a>(text: &'a str, positions: &[usize]) -> Line<'a> {
 }
 
 fn draw_table(frame: &mut Frame, app: &mut App, area: Rect) {
-    let title = format!("Conexiones {}/{} · {}", app.entries.len(), app.hosts.len(), app.sort.label());
+    let title = format!("Connections {}/{} · {}", app.entries.len(), app.hosts.len(), app.sort.label());
     let focused = matches!(app.mode, Mode::Normal) && app.focus == Focus::List;
     let block = block(&title, focused);
     let inner = block.inner(area);
-    // La primera línea es la cabecera.
+    // The first line is the header.
     app.rows_area = Rect { y: inner.y + 1, height: inner.height.saturating_sub(1), ..inner };
 
     if app.entries.is_empty() {
         let msg = if app.hosts.is_empty() {
-            "No hay conexiones guardadas.\nPulsa «a» para añadir una o importa tu ~/.ssh/config\ncon `sshh import-ssh-config`."
+            "No saved connections.\nPress 'a' to add one, or import your ~/.ssh/config\nwith `sshh import-ssh-config`."
         } else {
-            "Sin resultados."
+            "No results."
         };
         let p = Paragraph::new(msg).dim().centered().wrap(Wrap { trim: false });
         let [middle] = Layout::vertical([Constraint::Length(3)]).flex(Flex::Center).areas(inner);
@@ -111,7 +111,7 @@ fn draw_table(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let now = db::now();
-    // Ancho según el contenido (acotado); NOMBRE se queda con el resto.
+    // Width based on content (bounded); NAME takes the rest.
     let width = |f: &dyn Fn(&HostData) -> usize, min: usize, max: usize| {
         let w = app.entries.iter().map(|e| f(&app.hosts[e.index].data)).max().unwrap_or(0);
         w.clamp(min, max) as u16
@@ -130,7 +130,7 @@ fn draw_table(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(host.last_used.map(|t| relative_time(now - t)).unwrap_or_default().dim()),
         ])
     });
-    let header = Row::new(["ALIAS", "DESTINO", "NOMBRE", "TAGS", "ÚLTIMO USO"])
+    let header = Row::new(["ALIAS", "TARGET", "NAME", "TAGS", "LAST USED"])
         .style(Style::new().bold().fg(ACCENT));
     let table = Table::new(
         rows,
@@ -157,7 +157,7 @@ fn tags_text(d: &HostData) -> String {
 fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     app.detail_area = area;
     let focused = matches!(app.mode, Mode::Normal) && app.focus == Focus::Detail;
-    let block = block("Detalle", focused);
+    let block = block("Details", focused);
     let Some(host) = app.selected_host() else {
         frame.render_widget(block, area);
         return;
@@ -174,15 +174,15 @@ fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     lines.push(Line::default());
     lines.push(field("Alias", d.alias.clone()));
-    lines.push(field("Destino", d.target()));
+    lines.push(field("Target", d.target()));
     if let Some(identity) = &d.identity_file {
-        lines.push(field("Identidad", identity.clone()));
+        lines.push(field("Identity", identity.clone()));
     }
     if let Some(jump) = &d.proxy_jump {
         lines.push(field("ProxyJump", jump.clone()));
     }
     for opt in &d.extra_options {
-        lines.push(field("Opción", format!("{} {}", opt.key, opt.value)));
+        lines.push(field("Option", format!("{} {}", opt.key, opt.value)));
     }
     if !d.tags.is_empty() {
         let mut spans = vec![format!("{:<11}", "Tags").fg(ACCENT)];
@@ -191,19 +191,19 @@ fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     let usage = match host.last_used {
         Some(t) => {
-            let times = if host.use_count == 1 { "vez" } else { "veces" };
-            format!("{} {times} · último {}", host.use_count, relative_time(now - t))
+            let times = if host.use_count == 1 { "time" } else { "times" };
+            format!("{} {times} · last {}", host.use_count, relative_time(now - t))
         }
-        None => "nunca".into(),
+        None => "never".into(),
     };
-    lines.push(field("Uso", usage));
+    lines.push(field("Used", usage));
     lines.push(field(
-        "Creada",
+        "Created",
         format!("{} ({})", format_date(host.created_at), relative_time(now - host.created_at)),
     ));
     if !app.history.is_empty() {
         lines.push(Line::default());
-        lines.push(Line::from("Últimas conexiones".bold().fg(ACCENT)));
+        lines.push(Line::from("Recent connections".bold().fg(ACCENT)));
         for entry in &app.history {
             let args: Vec<String> = entry.args.iter().map(|a| shell_quote(a)).collect();
             lines.push(Line::from(vec![
@@ -214,12 +214,12 @@ fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     if let Some(notes) = &d.notes {
         lines.push(Line::default());
-        lines.push(Line::from("Notas".bold().fg(ACCENT)));
+        lines.push(Line::from("Notes".bold().fg(ACCENT)));
         lines.extend(Text::from(notes.as_str()).lines);
     }
 
     let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
-    // Limita el scroll para no dejar el panel vacío.
+    // Clamp the scroll so the pane never ends up empty.
     let max_scroll = (p.line_count(area.width) as u16).saturating_sub(area.height);
     let scroll = app.detail_scroll.min(max_scroll);
     frame.render_widget(p.scroll((scroll, 0)), area);
@@ -234,20 +234,20 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     }
     let keys: &[(&str, &str)] = match (&app.mode, app.focus) {
         (Mode::Search, _) => &[
-            ("Enter", "conectar"),
-            ("↑↓ Ctrl-j/k", "mover"),
-            ("Esc", "terminar búsqueda"),
+            ("Enter", "connect"),
+            ("↑↓ Ctrl-j/k", "move"),
+            ("Esc", "done searching"),
         ],
-        (_, Focus::Detail) => &[("j/k", "scroll"), ("Tab/Esc", "volver a la lista"), ("q", "salir")],
+        (_, Focus::Detail) => &[("j/k", "scroll"), ("Tab/Esc", "back to list"), ("q", "quit")],
         _ => &[
-            ("Enter", "conectar"),
-            ("/", "buscar"),
-            ("a", "nueva"),
-            ("e", "editar"),
-            ("dd", "borrar"),
-            ("yy", "copiar"),
-            ("?", "ayuda"),
-            ("q", "salir"),
+            ("Enter", "connect"),
+            ("/", "search"),
+            ("a", "add"),
+            ("e", "edit"),
+            ("dd", "delete"),
+            ("yy", "copy"),
+            ("?", "help"),
+            ("q", "quit"),
         ],
     };
     let mut spans: Vec<Span> = keys
@@ -268,48 +268,48 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 
 fn draw_confirm(frame: &mut Frame, alias: &str) {
     let lines = vec![
-        Line::from(vec!["¿Borrar la conexión ".into(), alias.to_string().bold(), "?".into()]),
+        Line::from(vec!["Delete connection ".into(), alias.to_string().bold(), "?".into()]),
         Line::default(),
         Line::from(vec![
             " y ".fg(Color::Red).bold(),
-            "borrar   ".dim(),
-            " cualquier otra tecla ".fg(ACCENT).bold(),
-            "cancelar".dim(),
+            "delete   ".dim(),
+            " any other key ".fg(ACCENT).bold(),
+            "cancel".dim(),
         ]),
     ];
     let area = centered(frame.area(), 52, 5);
     frame.render_widget(Clear, area);
-    let block = block("Confirmar", true).border_style(Style::new().fg(Color::Red));
+    let block = block("Confirm", true).border_style(Style::new().fg(Color::Red));
     frame.render_widget(Paragraph::new(lines).centered().block(block), area);
 }
 
 fn draw_help(frame: &mut Frame) {
     const HELP: &[(&str, &str)] = &[
-        ("Enter", "conectar"),
-        ("j/k ↑/↓", "mover"),
-        ("gg / G", "ir al principio / al final"),
-        ("Ctrl-d/u", "media página abajo / arriba"),
-        ("Ctrl-f/b", "página abajo / arriba"),
-        ("Tab", "foco lista ↔ detalle (scroll de notas)"),
+        ("Enter", "connect"),
+        ("j/k ↑/↓", "move"),
+        ("gg / G", "go to top / bottom"),
+        ("Ctrl-d/u", "half page down / up"),
+        ("Ctrl-f/b", "page down / up"),
+        ("Tab", "focus list ↔ details (scroll notes)"),
         ("", ""),
-        ("/", "buscar (fuzzy); #tag filtra por tag"),
-        ("Ctrl-j/k", "en la búsqueda, mover"),
-        ("Ctrl-w/u", "en la búsqueda, borra palabra / todo"),
-        ("Esc", "volver / limpiar búsqueda"),
+        ("/", "search (fuzzy); #tag filters by tag"),
+        ("Ctrl-j/k", "move while searching"),
+        ("Ctrl-w/u", "while searching, delete word / all"),
+        ("Esc", "back / clear search"),
         ("", ""),
-        ("a", "nueva conexión"),
-        ("e", "editar"),
-        ("t", "editar tags"),
-        ("dd", "borrar (pide confirmación)"),
-        ("yy", "copiar el comando ssh"),
-        ("s", "abrir sftp"),
-        ("c", "instalar tu clave pública (ssh-copy-id)"),
-        ("o", "cambiar orden (recientes / más usadas / alfabético)"),
-        ("R", "recargar"),
-        ("q / Ctrl-c", "salir"),
+        ("a", "add connection"),
+        ("e", "edit"),
+        ("t", "edit tags"),
+        ("dd", "delete (asks for confirmation)"),
+        ("yy", "copy the ssh command"),
+        ("s", "open sftp"),
+        ("c", "install your public key (ssh-copy-id)"),
+        ("o", "change sort (recent / most used / alphabetical)"),
+        ("R", "reload"),
+        ("q / Ctrl-c", "quit"),
         ("", ""),
-        ("Click", "seleccionar · doble click conecta"),
-        ("Rueda", "mover / scroll del detalle"),
+        ("Click", "select · double click connects"),
+        ("Wheel", "move / scroll details"),
     ];
     let lines: Vec<Line> = HELP
         .iter()
@@ -317,5 +317,5 @@ fn draw_help(frame: &mut Frame) {
         .collect();
     let area = centered(frame.area(), 66, lines.len() as u16 + 2);
     frame.render_widget(Clear, area);
-    frame.render_widget(Paragraph::new(lines).block(block("Ayuda", true)), area);
+    frame.render_widget(Paragraph::new(lines).block(block("Help", true)), area);
 }

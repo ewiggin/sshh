@@ -1,8 +1,8 @@
-//! Lectura de ficheros ssh_config para importar sus `Host`.
+//! Reads ssh_config files to import their `Host` blocks.
 //!
-//! Solo se importan los bloques `Host` con nombres concretos (sin comodines ni
-//! negaciones). Los bloques `Match`, los `Host *` y las opciones globales se
-//! ignoran porque ssh ya los aplica igualmente a cualquier conexión.
+//! Only `Host` blocks with concrete names (no wildcards or negations) are
+//! imported. `Match` blocks, `Host *` and global options are ignored because
+//! ssh applies them to every connection anyway.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,12 +12,12 @@ use anyhow::{Context, Result};
 use crate::model::{HostData, SshOption};
 use crate::ssh_args::parse_option;
 
-/// Nombre del fichero que generará sshh (fase 5); nunca se importa.
+/// Name of the file sshh generates (see `include`); it is never imported.
 pub const GENERATED_FILE_NAME: &str = "sshh.conf";
 
 const MAX_INCLUDE_DEPTH: usize = 16;
 
-/// Bloque `Host` descartado y por qué.
+/// Discarded `Host` block and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ignored {
     pub pattern: String,
@@ -56,7 +56,7 @@ struct Block {
 }
 
 struct Parser {
-    /// Directorio contra el que se resuelven los `Include` relativos.
+    /// Directory relative `Include`s are resolved against.
     base: PathBuf,
     parsed: Parsed,
     block: Option<Block>,
@@ -64,12 +64,12 @@ struct Parser {
 
 impl Parser {
     fn file(&mut self, path: &Path, depth: usize) -> Result<()> {
-        let text = fs::read_to_string(path).with_context(|| format!("leyendo {}", path.display()))?;
+        let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         self.text(&text, depth)
     }
 
     fn text(&mut self, text: &str, depth: usize) -> Result<()> {
-        // Comentarios justo encima de un `Host`: pasan a ser sus notas.
+        // Comments right above a `Host` become its notes.
         let mut comments: Vec<&str> = Vec::new();
         for line in text.lines().map(str::trim) {
             if line.is_empty() {
@@ -91,7 +91,7 @@ impl Parser {
                 }
                 "match" => {
                     self.finish_block();
-                    self.parsed.ignored.push(Ignored { pattern: line.to_string(), reason: "bloque Match" });
+                    self.parsed.ignored.push(Ignored { pattern: line.to_string(), reason: "Match block" });
                 }
                 "include" => {
                     for pattern in value.split_whitespace() {
@@ -113,7 +113,7 @@ impl Parser {
         let mut aliases = Vec::new();
         for pattern in patterns.split_whitespace() {
             if pattern.contains(['*', '?', '!']) {
-                self.parsed.ignored.push(Ignored { pattern: pattern.into(), reason: "patrón con comodines" });
+                self.parsed.ignored.push(Ignored { pattern: pattern.into(), reason: "wildcard pattern" });
             } else {
                 aliases.push(pattern.to_string());
             }
@@ -134,11 +134,11 @@ impl Parser {
         for alias in block.aliases {
             let mut data = HostData { alias: alias.clone(), ..block.data.clone() };
             if data.hostname.is_empty() {
-                // Sin HostName, ssh conecta al propio nombre del Host.
+                // Without HostName, ssh connects to the Host name itself.
                 data.hostname = alias;
             }
-            // Como ssh: si el alias aparece en varios bloques, gana el primer
-            // valor de cada opción.
+            // Like ssh: if the alias appears in several blocks, the first value
+            // of each option wins.
             match self.parsed.hosts.iter_mut().find(|h| h.alias == data.alias) {
                 Some(existing) => merge(existing, data),
                 None => self.parsed.hosts.push(data),
@@ -178,7 +178,7 @@ fn apply_option(data: &mut HostData, key: String, value: String) {
             Err(_) => data.extra_options.push(SshOption { key, value }),
         },
         "identityfile" if data.identity_file.is_none() => data.identity_file = Some(value),
-        // Varias IdentityFile son válidas en ssh: las demás van como opciones.
+        // Several IdentityFile lines are valid in ssh: the rest go as extra options.
         _ => data.extra_options.push(SshOption { key, value }),
     }
 }
@@ -205,7 +205,7 @@ pub fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// Glob sencillo: admite `*` y `?` en el último componente de la ruta.
+/// Simple glob: supports `*` and `?` in the last path component.
 fn glob(path: &Path) -> Vec<PathBuf> {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return vec![];
@@ -227,7 +227,7 @@ fn glob(path: &Path) -> Vec<PathBuf> {
 
 pub fn wildcard_match(pattern: &str, text: &str) -> bool {
     let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
-    // dp[j] = el prefijo del patrón procesado casa con t[..j]
+    // dp[j] = the pattern prefix processed so far matches t[..j]
     let mut dp = vec![false; t.len() + 1];
     dp[0] = true;
     for &pc in &p {
@@ -250,11 +250,11 @@ mod tests {
     use super::*;
 
     const CONFIG: &str = "
-# opciones globales: se ignoran
+# global options: ignored
 ServerAliveInterval 30
 
-# Servidor de pruebas
-# de OV
+# Test server
+# for OV
 Host ovtest
   HostName 10.50.1.17
   User somadmin
@@ -300,13 +300,13 @@ Host ovtest
         assert_eq!(ov.user.as_deref(), Some("somadmin"));
         assert_eq!(ov.port, Some(2200));
         assert_eq!(ov.identity_file.as_deref(), Some("~/.ssh/a"));
-        assert_eq!(ov.notes.as_deref(), Some("Servidor de pruebas\nde OV"));
+        assert_eq!(ov.notes.as_deref(), Some("Test server\nfor OV"));
         let extra: Vec<_> = ov.extra_options.iter().map(|o| format!("{}={}", o.key, o.value)).collect();
         assert_eq!(extra, ["IdentityFile=~/.ssh/b", "LocalForward=8080 localhost:80", "ForwardAgent=yes"]);
 
         assert_eq!(host(&p, "web2").proxy_jump.as_deref(), Some("bastion"));
         assert_eq!(host(&p, "web2").hostname, "web.example.com");
-        // Sin HostName se usa el propio alias; las comillas se quitan.
+        // Without HostName the alias itself is used; quotes are stripped.
         let bastion = host(&p, "bastion");
         assert_eq!((bastion.hostname.as_str(), bastion.user.as_deref()), ("bastion", Some("jump user")));
     }

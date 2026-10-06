@@ -1,4 +1,4 @@
-//! TUI: `sshh` sin argumentos y wizard de conexiones nuevas.
+//! TUI: `sshh` without arguments, and the wizard for new connections.
 
 mod app;
 mod form;
@@ -34,13 +34,13 @@ pub fn run() -> Result<()> {
             if program == "ssh-copy-id"
                 && let Some(identity) = &host.data.identity_file
             {
-                // ssh-copy-id no expande `~` (ssh sí lo hace con IdentityFile).
+                // ssh-copy-id doesn't expand `~` (ssh does for IdentityFile).
                 let identity = crate::ssh_config::expand_home(identity);
                 args.extend(["-i".to_string(), identity.to_string_lossy().into_owned()]);
             }
             args.extend(connect::tool_args(&host));
             let err = std::process::Command::new(program).args(&args).exec();
-            Err(anyhow::anyhow!(err).context(format!("no se pudo ejecutar {program}")))
+            Err(anyhow::anyhow!(err).context(format!("could not run {program}")))
         }
     }
 }
@@ -64,7 +64,7 @@ fn event_loop(terminal: &mut DefaultTerminal, db: &mut Db, app: &mut App) -> Res
     }
 }
 
-/// Carga el historial de la conexión seleccionada si ha cambiado.
+/// Loads the history of the selected connection if it changed.
 fn load_history(db: &Db, app: &mut App) -> Result<()> {
     let selected = app.selected_host().map(|h| h.id);
     if selected != app.history_for {
@@ -99,16 +99,16 @@ fn handle_request(
         Request::Delete { alias } => match db.delete_by_alias(&alias) {
             Ok(_) => {
                 app.set_hosts(db.list_hosts()?, None);
-                app.info(format!("Conexión «{alias}» borrada"));
+                app.info(format!("Connection '{alias}' deleted"));
                 refresh_include(db, app);
             }
-            Err(e) => app.error(format!("No se pudo borrar: {e:#}")),
+            Err(e) => app.error(format!("Could not delete: {e:#}")),
         },
         Request::Copy(data) => {
             let cmd = connect::ssh_command(&data);
             match term::copy(&cmd) {
-                Ok(()) => app.info(format!("Copiado: {cmd}")),
-                Err(e) => app.error(format!("No se pudo copiar: {e:#}")),
+                Ok(()) => app.info(format!("Copied: {cmd}")),
+                Err(e) => app.error(format!("Could not copy: {e:#}")),
             }
         }
         Request::Editor => {
@@ -120,7 +120,7 @@ fn handle_request(
             let selected = app.selected_host().map(|h| h.id);
             app.set_hosts(db.list_hosts()?, selected);
             app.history_for = None;
-            app.info("Lista recargada");
+            app.info("List reloaded");
         }
     }
     Ok(())
@@ -128,7 +128,7 @@ fn handle_request(
 
 fn refresh_include(db: &Db, app: &mut App) {
     if let Err(e) = include::refresh(db) {
-        app.error(format!("No se pudo actualizar ~/.ssh/config.d/sshh.conf: {e:#}"));
+        app.error(format!("Could not update ~/.ssh/config.d/sshh.conf: {e:#}"));
     }
 }
 
@@ -142,13 +142,13 @@ fn edit_focused(terminal: &mut DefaultTerminal, form: &mut Form) {
 
 pub enum WizardOutcome {
     Saved(i64),
-    /// Conectar sin guardar.
+    /// Connect without saving.
     Skipped,
-    /// Ctrl-c: no conectar.
+    /// Ctrl-c: don't connect.
     Aborted,
 }
 
-/// Formulario para guardar una conexión nueva antes de conectar.
+/// Form to save a new connection before connecting.
 pub fn wizard(db: &mut Db, prefill: &HostData, destination: &str) -> Result<WizardOutcome> {
     let mut form = Form::new(FormKind::Wizard, prefill);
     let mut terminal = term::init()?;
@@ -170,7 +170,7 @@ fn wizard_loop(
             let text = Line::from(vec![
                 " sshh: ".bold(),
                 destination.to_string().fg(ui::ACCENT).bold(),
-                " no está guardado. ¿Guardarlo antes de conectar?".into(),
+                " is not saved. Save it before connecting?".into(),
             ]);
             frame.render_widget(text, header);
             form.render(frame);
