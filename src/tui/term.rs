@@ -8,6 +8,7 @@ use std::{env, fs};
 use anyhow::{Context, Result, bail};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -17,7 +18,7 @@ pub fn init() -> Result<DefaultTerminal> {
     // ratatui installs its own hook (restores the terminal and calls this one).
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableMouseCapture);
+        let _ = execute!(stdout(), DisableMouseCapture, Show);
         hook(info);
     }));
     let terminal = ratatui::try_init()?;
@@ -25,8 +26,10 @@ pub fn init() -> Result<DefaultTerminal> {
     Ok(terminal)
 }
 
+/// Leaves TUI mode. Also shows the cursor explicitly: ratatui only does it when
+/// the `Terminal` is dropped, which never happens if we `exec` ssh afterwards.
 pub fn restore() {
-    let _ = execute!(stdout(), DisableMouseCapture);
+    let _ = execute!(stdout(), DisableMouseCapture, Show);
     ratatui::restore();
 }
 
@@ -45,7 +48,7 @@ pub fn edit_external(terminal: &mut DefaultTerminal, text: &str) -> Result<Strin
         .open(&path)?
         .write_all(text.as_bytes())?;
 
-    execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen, Show)?;
     disable_raw_mode()?;
     // The editor may carry arguments (`code --wait`), so it goes through the shell.
     let status = Command::new("sh")
