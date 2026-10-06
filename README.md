@@ -154,11 +154,11 @@ Terminal columns (these work from anywhere, also while typing in a session):
 |---|---|
 | `Enter` (in the list) | show the selected connection in the active column (opens its session; focuses it if it's already in a column; reconnects if it ended) |
 | `Alt-v` | show the selected connection in a **new column** right of the active one (split) |
-| `Alt-h` / `Alt-l` | column left / right; the list is the leftmost column |
+| `Alt-←` / `Alt-→` (or `Alt-h` / `Alt-l`) | column left / right; the list is the leftmost column |
 | `Alt-1` … `Alt-9` | jump to column N |
 | `Alt-j` / `Alt-k` | in a column: show the next / previous session there (sessions visible in other columns are skipped); in the list: select the next / previous connection with a session |
 | `Alt-w` | close the column (the session keeps running) |
-| `Alt-z` | zoom: the active column takes the whole screen (again to go back) |
+| `Alt-f` (or `Alt-z`) | full screen: the active column takes the whole screen, inside `sshh` (again to go back) |
 | `Alt-Shift-h` / `Alt-Shift-l` | move the active column left / right |
 
 Columns share the width equally; each one needs at least 40 characters, so the number of columns
@@ -190,8 +190,9 @@ List and general keys:
 | `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
 
 While a **terminal column has focus, every key goes to its ssh session** (including `Esc`, `Ctrl-c`,
-`q`, `Tab` and `Ctrl-w`), except the `Alt` shortcuts above. They were chosen not to clash with bash /
-readline (`Alt-.`, `Alt-b`, `Alt-f`, `Alt-d`… still reach the shell). When a session has ended,
+`q`, `Tab` and `Ctrl-w`), except the `Alt` shortcuts above. Note that `Alt-f` (readline: forward a
+word) and `Alt-←`/`Alt-→` (word movement in zsh/fish) are taken by `sshh`; use `Ctrl-←`/`Ctrl-→`
+in the shell instead. Other readline keys (`Alt-.`, `Alt-b`, `Alt-d`…) still reach the shell. When a session has ended,
 `Enter` reconnects and `Esc` goes back to the list.
 
 ### Search

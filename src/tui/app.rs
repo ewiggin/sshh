@@ -510,15 +510,17 @@ impl App {
         let in_terminal = self.focus == Focus::Terminal;
         match key.code {
             // The list is the leftmost column.
-            KeyCode::Char('h') if in_terminal && self.active_column > 0 => {
+            KeyCode::Char('h') | KeyCode::Left if in_terminal && self.active_column > 0 => {
                 self.focus_column(self.active_column - 1);
             }
-            KeyCode::Char('h') => {
+            KeyCode::Char('h') | KeyCode::Left => {
                 self.focus = Focus::List;
                 self.zoomed = false;
             }
-            KeyCode::Char('l') if in_terminal => self.focus_column(self.active_column + 1),
-            KeyCode::Char('l') => self.focus_column(0),
+            KeyCode::Char('l') | KeyCode::Right if in_terminal => {
+                self.focus_column(self.active_column + 1);
+            }
+            KeyCode::Char('l') | KeyCode::Right => self.focus_column(0),
             KeyCode::Char(c @ '1'..='9') => self.focus_column(usize::from(c as u8 - b'1')),
             KeyCode::Char('j') if in_terminal => self.cycle_column_session(true),
             KeyCode::Char('k') if in_terminal => self.cycle_column_session(false),
@@ -538,13 +540,14 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('z') if !self.columns.is_empty() => {
+            // Full screen for the active column, inside sshh.
+            KeyCode::Char('f' | 'z') if !self.columns.is_empty() => {
                 self.zoomed = !self.zoomed;
                 if self.zoomed {
                     self.focus_column(self.active_column);
                 }
             }
-            KeyCode::Char('z') => {}
+            KeyCode::Char('f' | 'z') => {}
             // Alt-Shift-h / Alt-Shift-l: move the active column.
             KeyCode::Char('H') if self.active_column > 0 => {
                 self.columns.swap(self.active_column, self.active_column - 1);
@@ -1169,6 +1172,28 @@ mod tests {
         app.on_key(alt('h'));
         assert!(!app.zoomed);
         assert_eq!(app.focus, Focus::List);
+    }
+
+    #[test]
+    fn alt_f_toggles_full_screen_and_alt_arrows_move() {
+        let mut app = app_with_two_columns();
+        app.on_key(alt('f'));
+        assert!(app.zoomed);
+        app.on_key(alt('f'));
+        assert!(!app.zoomed);
+        assert_eq!(app.request, None);
+        let alt_key = |code| KeyEvent::new(code, KeyModifiers::ALT);
+        app.on_key(alt_key(KeyCode::Left));
+        assert_eq!(app.active_column, 0);
+        app.on_key(alt_key(KeyCode::Right));
+        assert_eq!(app.active_column, 1);
+        app.on_key(alt_key(KeyCode::Left));
+        app.on_key(alt_key(KeyCode::Left));
+        assert_eq!(app.focus, Focus::List);
+        // Alt-f in the list doesn't run the full-screen ssh of `f`.
+        app.on_key(alt('f'));
+        assert_eq!(app.request, None);
+        assert!(app.zoomed);
     }
 
     #[test]

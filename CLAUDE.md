@@ -38,9 +38,10 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and
   clipboard (wl-copy/xclip, OSC 52 fallback).
 - Shortcuts: vim/lazygit style (`j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
-  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active column. Columns: `Alt-v` split, `Alt-h/l` move,
-  `Alt-1..9` jump, `Alt-j/k` change the column's session, `Alt-w` close column, `Alt-z` zoom,
-  `Alt-H/L` move column. Avoid Alt keys used by readline (`Alt-.`, `b`, `f`, `d`, `<`, `>`).
+  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active column. Columns: `Alt-v` split, `Alt-h/l` or `Alt-←/→` move,
+  `Alt-1..9` jump, `Alt-j/k` change the column's session, `Alt-w` close column, `Alt-f`/`Alt-z` full
+  screen (zoom), `Alt-H/L` move column. `Alt-f` was the user's choice despite clashing with readline;
+  avoid taking more readline Alt keys (`Alt-.`, `b`, `d`, `<`, `>`).
   With the terminal focused every other key goes to ssh. `Esc` always goes back one level (except in
   the terminal); only `q`/`Ctrl-c` quit (confirming if sessions are alive).
 - `cli`: own subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`,

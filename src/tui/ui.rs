@@ -282,7 +282,7 @@ fn draw_column(
         title.push_str(&format!(" · scrolled back {}", screen.scrollback()));
     }
     if app.zoomed {
-        title.push_str(" · zoomed (Alt-z)");
+        title.push_str(" · full screen (Alt-f)");
     }
     let mut block = block(&title, focused);
     if session.exit().is_none() {
@@ -336,11 +336,11 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let keys: &[(&str, &str)] = match (&app.mode, app.focus, active) {
         (Mode::Search, ..) => &[("Enter", "connect"), ("↑↓ Ctrl-j/k", "move"), ("Esc", "done searching")],
         (_, Focus::Terminal, Some(SessionState::Alive)) => &[
-            ("Alt-h/l", "column"),
+            ("Alt-←/→", "column"),
             ("Alt-1..9", "jump"),
             ("Alt-v", "split"),
             ("Alt-w", "close column"),
-            ("Alt-z", "zoom"),
+            ("Alt-f", "full screen"),
             ("Alt-j/k", "session"),
             ("", "other keys go to ssh"),
         ],
@@ -398,11 +398,11 @@ fn draw_help(frame: &mut Frame) {
     const HELP: &[(&str, &str)] = &[
         ("Enter", "show the connection in the active column"),
         ("Alt-v", "show it in a new column (split)"),
-        ("Alt-h / Alt-l", "column left / right (the list is the first)"),
+        ("Alt-←/→ Alt-h/l", "column left / right (the list is the first)"),
         ("Alt-1 … Alt-9", "jump to column N"),
         ("Alt-j / Alt-k", "next / previous session in the column"),
         ("Alt-w", "close the column (the session keeps running)"),
-        ("Alt-z", "zoom the active column"),
+        ("Alt-f / Alt-z", "full screen for the active column (toggle)"),
         ("Alt-H / Alt-L", "move the column left / right"),
         ("x", "close the session"),
         ("f", "full-screen ssh (back to sshh on exit)"),
@@ -429,9 +429,9 @@ fn draw_help(frame: &mut Frame) {
     ];
     let lines: Vec<Line> = HELP
         .iter()
-        .map(|(k, desc)| Line::from(vec![format!(" {k:<14}").fg(ACCENT).bold(), (*desc).into()]))
+        .map(|(k, desc)| Line::from(vec![format!(" {k:<16}").fg(ACCENT).bold(), (*desc).into()]))
         .collect();
-    let area = centered(frame.area(), 70, lines.len() as u16 + 2);
+    let area = centered(frame.area(), 72, lines.len() as u16 + 2);
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(lines).block(block("Help", true)), area);
 }
