@@ -19,6 +19,10 @@ use crate::db::HistoryEntry;
 use crate::model::{Host, HostData};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// Narrowest terminal column allowed when splitting.
+const MIN_COLUMN_WIDTH: u16 = 40;
+/// Columns reachable with Alt-1..Alt-9.
+const MAX_COLUMNS: usize = 9;
 
 /// How the TUI ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,11 +50,11 @@ pub enum Request {
     /// Open (or reopen, if it ended) the embedded session of a connection.
     OpenSession(Box<Host>),
     CloseSession(i64),
-    /// Input for the embedded session of the selected connection.
-    Input(KeyEvent),
-    Paste(String),
-    /// Scroll the selected session's history (positive = back).
-    Scroll(isize),
+    /// Input for the embedded session of a connection.
+    Input(i64, KeyEvent),
+    Paste(i64, String),
+    /// Scroll a session's history (positive = back).
+    Scroll(i64, isize),
     External { program: External, host: Box<Host> },
 }
 
@@ -124,7 +128,7 @@ pub enum Focus {
     #[default]
     List,
     Detail,
-    /// The embedded terminal: keys go to the ssh session.
+    /// The active terminal column: keys go to its ssh session.
     Terminal,
 }
 
@@ -156,11 +160,19 @@ pub struct App {
     pub history_for: Option<i64>,
     /// Embedded sessions by connection id (kept in sync by the main loop).
     pub sessions: HashMap<i64, SessionState>,
+    /// Connections shown as terminal columns, left to right.
+    pub columns: Vec<i64>,
+    pub active_column: usize,
+    /// The active column takes the whole screen.
+    pub zoomed: bool,
     /// Areas from the last render (for the mouse and to size sessions).
     pub rows_area: Rect,
     pub search_area: Rect,
     pub detail_area: Rect,
-    pub terminal_area: Rect,
+    /// Whole area for the terminal columns.
+    pub columns_area: Rect,
+    /// Inner area of every visible column, by column index.
+    pub column_areas: Vec<(usize, Rect)>,
     matcher: Matcher,
     last_click: Option<(usize, Instant)>,
 }
@@ -183,10 +195,14 @@ impl App {
             history: Vec::new(),
             history_for: None,
             sessions: HashMap::new(),
+            columns: Vec::new(),
+            active_column: 0,
+            zoomed: false,
             rows_area: Rect::default(),
             search_area: Rect::default(),
             detail_area: Rect::default(),
-            terminal_area: Rect::default(),
+            columns_area: Rect::default(),
+            column_areas: Vec::new(),
             matcher: Matcher::new(Config::DEFAULT),
             last_click: None,
         };
@@ -205,6 +221,63 @@ impl App {
         self.sessions.get(&self.selected_host()?.id).copied()
     }
 
+    pub fn host(&self, id: i64) -> Option<&Host> {
+        self.hosts.iter().find(|h| h.id == id)
+    }
+
+    /// Connection shown in the active column.
+    pub fn active_host_id(&self) -> Option<i64> {
+        self.columns.get(self.active_column).copied()
+    }
+
+    fn column_of(&self, id: i64) -> Option<usize> {
+        self.columns.iter().position(|c| *c == id)
+    }
+
+    /// Focuses terminal column `index` and selects its connection in the list.
+    fn focus_column(&mut self, index: usize) {
+        let Some(&id) = self.columns.get(index) else { return };
+        self.active_column = index;
+        self.mode = Mode::Normal;
+        self.focus = Focus::Terminal;
+        if let Some(row) = self.entries.iter().position(|e| self.hosts[e.index].id == id) {
+            self.select(row);
+        }
+    }
+
+    /// Removes the column showing connection `id`, if any.
+    pub fn remove_column_of(&mut self, id: i64) {
+        if let Some(index) = self.column_of(id) {
+            self.remove_column(index);
+        }
+    }
+
+    fn remove_column(&mut self, index: usize) {
+        if index >= self.columns.len() {
+            return;
+        }
+        self.columns.remove(index);
+        if self.columns.is_empty() {
+            self.active_column = 0;
+            self.zoomed = false;
+            if self.focus == Focus::Terminal {
+                self.focus = Focus::List;
+            }
+        } else {
+            self.active_column = self.active_column.min(self.columns.len() - 1);
+            if index < self.active_column {
+                self.active_column -= 1;
+            }
+        }
+    }
+
+    fn max_columns(&self) -> usize {
+        match self.columns_area.width {
+            0 => MAX_COLUMNS,
+            width => usize::from(width / MIN_COLUMN_WIDTH).clamp(1, MAX_COLUMNS),
+        }
+    }
+
     fn alive_sessions(&self) -> usize {
         self.sessions.values().filter(|s| **s == SessionState::Alive).count()
     }
@@ -219,6 +292,12 @@ impl App {
             self.entries.iter().position(|e| self.hosts[e.index].id == id)
         });
         self.select(by_id.unwrap_or(previous));
+        // Drop columns of connections that no longer exist.
+        let gone: Vec<i64> =
+            self.columns.iter().copied().filter(|id| self.host(*id).is_none()).collect();
+        for id in gone {
+            self.remove_column_of(id);
+        }
     }
 
     /// Result of a `Save` request.
@@ -344,14 +423,44 @@ impl App {
         self.rows_area.height.max(1) as isize
     }
 
-    /// Opens (or focuses) the embedded session of the selected connection.
+    /// Enter: shows the selected connection in the active column.
     fn connect_selected(&mut self) {
-        let Some(host) = self.selected_host() else { return };
-        if self.selected_session() != Some(SessionState::Alive) {
-            self.request = Some(Request::OpenSession(Box::new(host.clone())));
+        self.open_in_column(false);
+    }
+
+    /// Shows the selected connection in the active column or, with
+    /// `new_column`, in a new column right of it. Opens its session if needed.
+    /// A connection already shown in a column just gets focused.
+    fn open_in_column(&mut self, new_column: bool) {
+        let Some(host) = self.selected_host().cloned() else { return };
+        let index = match self.column_of(host.id) {
+            Some(index) => {
+                if new_column {
+                    self.info(format!("'{}' is already open in column {}", host.data.alias, index + 1));
+                }
+                index
+            }
+            None if new_column || self.columns.is_empty() => {
+                if self.columns.len() >= self.max_columns() {
+                    self.error(format!(
+                        "No room for another column (at least {MIN_COLUMN_WIDTH} characters each)"
+                    ));
+                    return;
+                }
+                let index = if self.columns.is_empty() { 0 } else { self.active_column + 1 };
+                self.columns.insert(index, host.id);
+                self.zoomed = false;
+                index
+            }
+            None => {
+                self.columns[self.active_column] = host.id;
+                self.active_column
+            }
+        };
+        if self.sessions.get(&host.id) != Some(&SessionState::Alive) {
+            self.request = Some(Request::OpenSession(Box::new(host)));
         }
-        self.mode = Mode::Normal;
-        self.focus = Focus::Terminal;
+        self.focus_column(index);
     }
 
     fn quit(&mut self) {
@@ -377,41 +486,105 @@ impl App {
         }
     }
 
-    /// Alt-h/j/k/l: move between panes and sessions from anywhere.
+    /// Shows the next (or previous) session in the active column, skipping
+    /// sessions already visible in other columns.
+    fn cycle_column_session(&mut self, forward: bool) {
+        let Some(current) = self.active_host_id() else { return };
+        let candidates: Vec<i64> = self
+            .entries
+            .iter()
+            .map(|e| self.hosts[e.index].id)
+            .filter(|id| self.sessions.contains_key(id) && (*id == current || self.column_of(*id).is_none()))
+            .collect();
+        let Some(pos) = candidates.iter().position(|id| *id == current) else { return };
+        let next = if forward { pos + 1 } else { pos + candidates.len() - 1 };
+        self.columns[self.active_column] = candidates[next % candidates.len()];
+        self.focus_column(self.active_column);
+    }
+
+    /// Alt shortcuts: columns, focus and sessions, from anywhere.
     fn on_alt_key(&mut self, key: KeyEvent) -> bool {
         if !key.modifiers.contains(KeyModifiers::ALT) {
             return false;
         }
+        let in_terminal = self.focus == Focus::Terminal;
         match key.code {
-            KeyCode::Char('h') => self.focus = Focus::List,
-            KeyCode::Char('l') if self.selected_session().is_some() => self.focus = Focus::Terminal,
-            KeyCode::Char('l') => {}
+            // The list is the leftmost column.
+            KeyCode::Char('h') if in_terminal && self.active_column > 0 => {
+                self.focus_column(self.active_column - 1);
+            }
+            KeyCode::Char('h') => {
+                self.focus = Focus::List;
+                self.zoomed = false;
+            }
+            KeyCode::Char('l') if in_terminal => self.focus_column(self.active_column + 1),
+            KeyCode::Char('l') => self.focus_column(0),
+            KeyCode::Char(c @ '1'..='9') => self.focus_column(usize::from(c as u8 - b'1')),
+            KeyCode::Char('j') if in_terminal => self.cycle_column_session(true),
+            KeyCode::Char('k') if in_terminal => self.cycle_column_session(false),
             KeyCode::Char('j') => self.switch_session(true),
             KeyCode::Char('k') => self.switch_session(false),
+            KeyCode::Char('v') => self.open_in_column(true),
+            KeyCode::Char('w') => {
+                let index = if in_terminal {
+                    Some(self.active_column)
+                } else {
+                    self.selected_host().and_then(|h| self.column_of(h.id))
+                };
+                if let Some(index) = index {
+                    self.remove_column(index);
+                    if in_terminal && !self.columns.is_empty() {
+                        self.focus_column(self.active_column);
+                    }
+                }
+            }
+            KeyCode::Char('z') if !self.columns.is_empty() => {
+                self.zoomed = !self.zoomed;
+                if self.zoomed {
+                    self.focus_column(self.active_column);
+                }
+            }
+            KeyCode::Char('z') => {}
+            // Alt-Shift-h / Alt-Shift-l: move the active column.
+            KeyCode::Char('H') if self.active_column > 0 => {
+                self.columns.swap(self.active_column, self.active_column - 1);
+                self.focus_column(self.active_column - 1);
+            }
+            KeyCode::Char('L') if self.active_column + 1 < self.columns.len() => {
+                self.columns.swap(self.active_column, self.active_column + 1);
+                self.focus_column(self.active_column + 1);
+            }
+            KeyCode::Char('H' | 'L') => {}
             _ => return false,
-        }
-        if self.focus == Focus::Terminal && self.selected_session().is_none() {
-            self.focus = Focus::List;
         }
         true
     }
 
-    /// Keys while the embedded terminal has focus: everything goes to ssh.
+    /// Keys while a terminal column has focus: everything goes to ssh.
     fn on_terminal_key(&mut self, key: KeyEvent) {
-        match self.selected_session() {
-            Some(SessionState::Alive) => self.request = Some(Request::Input(key)),
-            Some(SessionState::Ended) if key.code == KeyCode::Enter => self.connect_selected(),
-            Some(SessionState::Ended) if key.code == KeyCode::Esc => self.focus = Focus::List,
-            Some(SessionState::Ended) => {}
-            None => self.focus = Focus::List,
+        let Some(id) = self.active_host_id() else {
+            self.focus = Focus::List;
+            return;
+        };
+        match (self.sessions.get(&id), key.code) {
+            (Some(SessionState::Alive), _) => self.request = Some(Request::Input(id, key)),
+            (_, KeyCode::Enter) => {
+                if let Some(host) = self.host(id) {
+                    self.request = Some(Request::OpenSession(Box::new(host.clone())));
+                }
+            }
+            (_, KeyCode::Esc) => self.focus = Focus::List,
+            _ => {}
         }
     }
 
     pub fn on_paste(&mut self, text: &str) {
         match &mut self.mode {
             Mode::Normal if self.focus == Focus::Terminal => {
-                if self.selected_session() == Some(SessionState::Alive) {
-                    self.request = Some(Request::Paste(text.to_string()));
+                if let Some(id) = self.active_host_id()
+                    && self.sessions.get(&id) == Some(&SessionState::Alive)
+                {
+                    self.request = Some(Request::Paste(id, text.to_string()));
                 }
             }
             Mode::Search => {
@@ -468,11 +641,13 @@ impl App {
                 self.mode = Mode::Normal;
             }
             Mode::ConfirmClose { id, .. } => {
+                let id = *id;
+                self.mode = Mode::Normal;
                 if matches!(key.code, KeyCode::Char('y' | 'Y')) {
-                    self.request = Some(Request::CloseSession(*id));
+                    self.request = Some(Request::CloseSession(id));
+                    self.remove_column_of(id);
                     self.focus = Focus::List;
                 }
-                self.mode = Mode::Normal;
             }
             Mode::ConfirmQuit { .. } => {
                 if matches!(key.code, KeyCode::Char('y' | 'Y')) {
@@ -540,16 +715,19 @@ impl App {
         }
     }
 
-    /// Tab / Shift-Tab: list → details → terminal (only if the selected
-    /// connection has a session) and back. Inside the terminal Tab goes to ssh.
+    /// Tab / Shift-Tab: list → details → active terminal column (if there is
+    /// one) and back. Inside the terminal Tab goes to ssh.
     fn cycle_focus(&mut self, forward: bool) {
         let mut panes = vec![Focus::List, Focus::Detail];
-        if self.selected_session().is_some() {
+        if !self.columns.is_empty() {
             panes.push(Focus::Terminal);
         }
         let current = panes.iter().position(|f| *f == self.focus).unwrap_or(0);
         let next = if forward { current + 1 } else { current + panes.len() - 1 };
-        self.focus = panes[next % panes.len()];
+        match panes[next % panes.len()] {
+            Focus::Terminal => self.focus_column(self.active_column),
+            pane => self.focus = pane,
+        }
     }
 
     /// Keys while the detail pane has focus; returns false if not consumed.
@@ -578,7 +756,10 @@ impl App {
         let (id, alias) = (host.id, host.data.alias.clone());
         match self.selected_session() {
             Some(SessionState::Alive) => self.mode = Mode::ConfirmClose { id, alias },
-            Some(SessionState::Ended) => self.request = Some(Request::CloseSession(id)),
+            Some(SessionState::Ended) => {
+                self.request = Some(Request::CloseSession(id));
+                self.remove_column_of(id);
+            }
             None => {}
         }
     }
@@ -639,15 +820,19 @@ impl App {
     pub fn on_mouse(&mut self, mouse: MouseEvent) {
         let pos = Position::new(mouse.column, mouse.row);
         let in_detail = self.detail_area.contains(pos);
-        let in_terminal = self.terminal_area.contains(pos) && self.selected_session().is_some();
+        let column = self.column_areas.iter().find(|(_, area)| area.contains(pos)).map(|(i, _)| *i);
+        let column_host = column.and_then(|i| self.columns.get(i).copied());
+        let in_terminal = column_host.is_some();
         match (&mut self.mode, mouse.kind) {
             (Mode::Form(form), MouseEventKind::Down(MouseButton::Left)) => form.on_click(pos),
             (Mode::Form(_) | Mode::ConfirmDelete { .. } | Mode::ConfirmClose { .. }, _) => {}
             (Mode::ConfirmQuit { .. }, _) => {}
             (Mode::Help, MouseEventKind::Down(_)) => self.mode = Mode::Normal,
             (Mode::Help, _) => {}
-            (_, MouseEventKind::ScrollDown) if in_terminal => self.request = Some(Request::Scroll(-3)),
-            (_, MouseEventKind::ScrollUp) if in_terminal => self.request = Some(Request::Scroll(3)),
+            (_, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) if let Some(id) = column_host => {
+                let delta = if mouse.kind == MouseEventKind::ScrollUp { 3 } else { -3 };
+                self.request = Some(Request::Scroll(id, delta));
+            }
             (_, MouseEventKind::ScrollDown) if in_detail => self.scroll_detail(1),
             (_, MouseEventKind::ScrollUp) if in_detail => self.scroll_detail(-1),
             (_, MouseEventKind::ScrollDown) => self.move_by(1),
@@ -655,9 +840,8 @@ impl App {
             (_, MouseEventKind::Down(MouseButton::Left)) => {
                 if self.search_area.contains(pos) {
                     self.mode = Mode::Search;
-                } else if in_terminal {
-                    self.mode = Mode::Normal;
-                    self.focus = Focus::Terminal;
+                } else if let Some(index) = column.filter(|_| in_terminal) {
+                    self.focus_column(index);
                 } else if in_detail {
                     self.mode = Mode::Normal;
                     self.focus = Focus::Detail;
@@ -866,52 +1050,150 @@ mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
     }
 
-    #[test]
-    fn enter_focuses_an_alive_session_without_reopening() {
+    fn columns(app: &App) -> Vec<&str> {
+        app.columns.iter().map(|id| app.host(*id).unwrap().data.alias.as_str()).collect()
+    }
+
+    /// Columns [db1, dev] with the second one active.
+    fn app_with_two_columns() -> App {
         let mut app = app_with_sessions();
         app.on_key(key(KeyCode::Enter));
-        assert_eq!((app.focus, &app.request), (Focus::Terminal, &None));
+        app.on_key(alt('h'));
+        app.on_key(ch('j'));
+        app.on_key(alt('v'));
+        app.request = None;
+        app
     }
 
     #[test]
-    fn terminal_focus_forwards_every_key() {
+    fn enter_shows_the_selection_in_the_active_column() {
         let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::Enter));
+        // db1's session is alive: shown without reopening it.
+        assert_eq!((columns(&app), app.focus, &app.request), (vec!["db1"], Focus::Terminal, &None));
+        app.on_key(alt('h'));
+        app.on_key(ch('k'));
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!(columns(&app), ["web1"]);
+        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 1));
+    }
+
+    #[test]
+    fn alt_v_splits_and_alt_h_l_navigate_columns() {
+        let mut app = app_with_two_columns();
+        assert_eq!(columns(&app), ["db1", "dev"]);
+        assert_eq!((app.focus, app.active_column), (Focus::Terminal, 1));
+        app.on_key(alt('h'));
+        assert_eq!(app.active_column, 0);
+        // The list selection follows the focused column.
+        assert_eq!(app.selected_host().unwrap().data.alias, "db1");
+        app.on_key(alt('h'));
+        assert_eq!(app.focus, Focus::List);
         app.on_key(alt('l'));
-        assert_eq!(app.focus, Focus::Terminal);
-        for k in [ch('q'), ctrl('c'), key(KeyCode::Esc), ch('/')] {
+        assert_eq!((app.focus, app.active_column), (Focus::Terminal, 0));
+        app.on_key(alt('2'));
+        assert_eq!(app.active_column, 1);
+        app.on_key(alt('9'));
+        assert_eq!(app.active_column, 1);
+        app.on_key(alt('l'));
+        assert_eq!(app.active_column, 1);
+        // A connection already in a column is focused, not opened twice.
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(alt('v'));
+        assert_eq!((columns(&app).len(), app.active_column), (2, 0));
+    }
+
+    #[test]
+    fn terminal_focus_sends_keys_to_the_active_column() {
+        let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::Enter));
+        for k in [ch('q'), ctrl('c'), key(KeyCode::Esc), ch('/'), key(KeyCode::Tab)] {
             app.on_key(k);
-            assert_eq!(app.request.take(), Some(Request::Input(k)));
+            assert_eq!(app.request.take(), Some(Request::Input(2, k)));
         }
         assert_eq!(app.outcome, None);
         app.on_paste("ls\n");
-        assert_eq!(app.request.take(), Some(Request::Paste("ls\n".into())));
-        app.on_key(alt('h'));
-        assert_eq!((app.focus, &app.request), (Focus::List, &None));
+        assert_eq!(app.request.take(), Some(Request::Paste(2, "ls\n".into())));
     }
 
     #[test]
-    fn alt_l_needs_a_session() {
-        let mut app = app();
+    fn alt_l_needs_a_column() {
+        let mut app = app_with_sessions();
         app.on_key(alt('l'));
         assert_eq!(app.focus, Focus::List);
     }
 
     #[test]
-    fn alt_j_k_cycle_through_sessions() {
+    fn alt_j_k_switch_the_session_of_the_column() {
         let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::Enter));
         app.on_key(alt('j'));
-        assert_eq!(app.selected_host().unwrap().id, 3);
-        app.on_key(alt('j'));
-        assert_eq!(app.selected_host().unwrap().id, 2);
+        assert_eq!(columns(&app), ["dev"]);
         app.on_key(alt('k'));
+        assert_eq!(columns(&app), ["db1"]);
+        // Sessions visible in another column are skipped.
+        let mut app = app_with_two_columns();
+        app.on_key(alt('j'));
+        assert_eq!(columns(&app), ["db1", "dev"]);
+        // In the list, Alt-j/k move the selection between sessions.
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(alt('j'));
         assert_eq!(app.selected_host().unwrap().id, 3);
+    }
+
+    #[test]
+    fn alt_w_closes_columns_but_keeps_sessions() {
+        let mut app = app_with_two_columns();
+        app.on_key(alt('w'));
+        assert_eq!((columns(&app), app.active_column, app.focus), (vec!["db1"], 0, Focus::Terminal));
+        assert!(app.sessions.contains_key(&3));
+        assert_eq!(app.request, None);
+        app.on_key(alt('w'));
+        assert!(app.columns.is_empty());
+        assert_eq!(app.focus, Focus::List);
+    }
+
+    #[test]
+    fn zoom_and_move_columns() {
+        let mut app = app_with_two_columns();
+        app.on_key(alt('H'));
+        assert_eq!((columns(&app), app.active_column), (vec!["dev", "db1"], 0));
+        app.on_key(alt('L'));
+        assert_eq!((columns(&app), app.active_column), (vec!["db1", "dev"], 1));
+        app.on_key(alt('z'));
+        assert!(app.zoomed);
+        app.on_key(alt('h'));
+        assert!(app.zoomed && app.active_column == 0);
+        app.on_key(alt('h'));
+        assert!(!app.zoomed);
+        assert_eq!(app.focus, Focus::List);
+    }
+
+    #[test]
+    fn splitting_respects_the_minimum_width() {
+        let mut app = app_with_sessions();
+        app.columns_area = Rect::new(30, 0, 90, 30);
+        app.on_key(alt('v'));
+        app.on_key(alt('h'));
+        app.on_key(ch('j'));
+        app.on_key(alt('v'));
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(ch('g'));
+        app.on_key(ch('g'));
+        app.on_key(alt('v'));
+        assert_eq!(columns(&app), ["db1", "dev"]);
+        assert!(app.status.as_ref().unwrap().error);
     }
 
     #[test]
     fn ended_session_reconnects_on_enter() {
         let mut app = app_with_sessions();
         app.on_key(ch('j'));
-        app.on_key(alt('l'));
+        app.on_key(key(KeyCode::Enter));
+        app.request = None;
         app.on_key(ch('a'));
         assert_eq!(app.request, None);
         app.on_key(key(KeyCode::Enter));
@@ -921,10 +1203,13 @@ mod tests {
     #[test]
     fn closing_and_quitting_ask_when_sessions_are_alive() {
         let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(alt('h'));
         app.on_key(ch('x'));
         assert!(matches!(&app.mode, Mode::ConfirmClose { id: 2, .. }));
         app.on_key(ch('y'));
         assert_eq!(app.request.take(), Some(Request::CloseSession(2)));
+        assert!(app.columns.is_empty());
 
         app.on_key(ch('q'));
         assert!(matches!(app.mode, Mode::ConfirmQuit { sessions: 1 }));
@@ -936,17 +1221,16 @@ mod tests {
     }
 
     #[test]
-    fn wheel_over_the_session_scrolls_its_history() {
-        let mut app = app_with_sessions();
-        app.terminal_area = Rect::new(40, 0, 80, 20);
-        let wheel = MouseEvent {
-            kind: MouseEventKind::ScrollUp,
-            column: 50,
-            row: 5,
-            modifiers: KeyModifiers::NONE,
-        };
-        app.on_mouse(wheel);
-        assert_eq!(app.request, Some(Request::Scroll(3)));
+    fn mouse_on_columns() {
+        let mut app = app_with_two_columns();
+        app.column_areas = vec![(0, Rect::new(30, 1, 40, 20)), (1, Rect::new(72, 1, 40, 20))];
+        let at = |kind, column| MouseEvent { kind, column, row: 5, modifiers: KeyModifiers::NONE };
+        app.on_mouse(at(MouseEventKind::ScrollUp, 35));
+        assert_eq!(app.request.take(), Some(Request::Scroll(2, 3)));
+        app.on_mouse(at(MouseEventKind::ScrollDown, 80));
+        assert_eq!(app.request.take(), Some(Request::Scroll(3, -3)));
+        app.on_mouse(at(MouseEventKind::Down(MouseButton::Left), 35));
+        assert_eq!((app.focus, app.active_column), (Focus::Terminal, 0));
     }
 
     #[test]
@@ -1032,12 +1316,14 @@ mod tests {
         app.on_key(key(KeyCode::BackTab));
         assert_eq!(app.focus, Focus::Detail);
 
-        // With a session the terminal joins the cycle; inside it Tab goes to ssh.
+        // With a column the terminal joins the cycle; inside it Tab goes to ssh.
         let mut app = app_with_sessions();
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(alt('h'));
         app.on_key(key(KeyCode::BackTab));
         assert_eq!(app.focus, Focus::Terminal);
         app.on_key(key(KeyCode::Tab));
-        assert_eq!(app.request.take(), Some(Request::Input(key(KeyCode::Tab))));
+        assert_eq!(app.request.take(), Some(Request::Input(2, key(KeyCode::Tab))));
         app.on_key(alt('h'));
         app.on_key(key(KeyCode::Tab));
         app.on_key(key(KeyCode::Tab));

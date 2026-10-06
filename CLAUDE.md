@@ -26,7 +26,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   disables it). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
 - `db`: SQLite + migrations via `PRAGMA user_version` (append to `MIGRATIONS`, never edit existing ones).
 - `tui`: `sshh` without args, and the wizard. Lazygit-style layout: search + list + details on the
-  left, embedded ssh session of the selected connection on the right.
+  left, terminal columns on the right (`App::columns` = connection ids left to right,
+  `active_column`, `zoomed`). The list is "column 0" for Alt-h/l. Requests that target a session carry
+  its id (`Input`, `Paste`, `Scroll`); the loop resizes each session to its `App::column_areas` rect.
   `app.rs` = state + events (testable without a terminal); side effects (DB, clipboard, $EDITOR,
   sessions) are requested through `App::request` and run by `mod.rs`, which owns the sessions and
   publishes their state in `App::sessions`. `session.rs` = ssh in a PTY (portable-pty) + vt100
@@ -36,7 +38,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and
   clipboard (wl-copy/xclip, OSC 52 fallback).
 - Shortcuts: vim/lazygit style (`j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
-  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → terminal, `Alt-h/l` move focus list/terminal, `Alt-j/k` switch sessions.
+  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active column. Columns: `Alt-v` split, `Alt-h/l` move,
+  `Alt-1..9` jump, `Alt-j/k` change the column's session, `Alt-w` close column, `Alt-z` zoom,
+  `Alt-H/L` move column. Avoid Alt keys used by readline (`Alt-.`, `b`, `f`, `d`, `<`, `>`).
   With the terminal focused every other key goes to ssh. `Esc` always goes back one level (except in
   the terminal); only `q`/`Ctrl-c` quit (confirming if sessions are alive).
 - `cli`: own subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`,
@@ -64,3 +68,4 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 4. ✅ History, JSON import/export, `~/.ssh/config` import.
 5. ✅ Generated ssh_config file; quick actions (sftp, ssh-copy-id).
 6. ✅ Embedded ssh sessions (several at once) next to the list.
+7. ✅ Terminal columns side by side.

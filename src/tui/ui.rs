@@ -27,20 +27,29 @@ const CONNECTED: Color = Color::Green;
 pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Session>) {
     let [main, footer] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
-    let left_width = (main.width * 28 / 100).clamp(26, 44).min(main.width);
-    let [left, right] =
-        Layout::horizontal([Constraint::Length(left_width), Constraint::Fill(1)]).areas(main);
-    let [search, list, detail] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Percentage(55),
-        Constraint::Fill(1),
-    ])
-    .areas(left);
-
-    draw_search(frame, app, search);
-    draw_list(frame, app, list);
-    draw_detail(frame, app, detail);
-    draw_main(frame, app, sessions, right);
+    app.column_areas.clear();
+    if app.zoomed && !app.columns.is_empty() {
+        // Only the active column, on the whole screen.
+        app.rows_area = Rect::default();
+        app.search_area = Rect::default();
+        app.detail_area = Rect::default();
+        app.columns_area = main;
+        draw_column(frame, app, sessions, app.active_column, main);
+    } else {
+        let left_width = (main.width * 24 / 100).clamp(24, 40).min(main.width);
+        let [left, right] =
+            Layout::horizontal([Constraint::Length(left_width), Constraint::Fill(1)]).areas(main);
+        let [search, list, detail] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Percentage(55),
+            Constraint::Fill(1),
+        ])
+        .areas(left);
+        draw_search(frame, app, search);
+        draw_list(frame, app, list);
+        draw_detail(frame, app, detail);
+        draw_columns(frame, app, sessions, right);
+    }
     draw_footer(frame, app, footer);
     match &mut app.mode {
         Mode::Help => draw_help(frame),
@@ -207,43 +216,78 @@ fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     app.detail_scroll = scroll;
 }
 
-/// Right pane: the selected connection's session, or an overview if it has none.
-fn draw_main(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Session>, area: Rect) {
-    let focused = pane_focused(app, Focus::Terminal);
-    // Every variant of this pane has a border; sessions are sized to the inside.
-    app.terminal_area = Block::bordered().inner(area);
+/// Right side: the terminal columns, or an overview of the selected
+/// connection when no column is open.
+fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Session>, area: Rect) {
+    app.columns_area = area;
+    if app.columns.is_empty() {
+        draw_overview(frame, app, sessions, area);
+        return;
+    }
+    let areas = Layout::horizontal(vec![Constraint::Fill(1); app.columns.len()]).split(area);
+    for (index, column) in areas.iter().enumerate() {
+        draw_column(frame, app, sessions, index, *column);
+    }
+}
+
+fn draw_overview(frame: &mut Frame, app: &App, sessions: &HashMap<i64, Session>, area: Rect) {
     let Some(host) = app.selected_host() else {
-        let block = block("sshh", false);
         let text = if app.hosts.is_empty() {
             "No saved connections.\n\nPress 'a' to add one, or import your ~/.ssh/config\nwith `sshh import-ssh-config`."
         } else {
             "No connection selected."
         };
-        let [middle] = Layout::vertical([Constraint::Length(4)]).flex(Flex::Center).areas(app.terminal_area);
+        let block = block("sshh", false);
+        let [middle] = Layout::vertical([Constraint::Length(4)]).flex(Flex::Center).areas(block.inner(area));
         frame.render_widget(block, area);
         frame.render_widget(Paragraph::new(text).dim().centered(), middle);
         return;
     };
+    let title = match sessions.get(&host.id).map(|s| s.exit().is_none()) {
+        Some(true) => format!("{} — session running · Enter shows it", host.data.alias),
+        Some(false) => format!("{} — session ended · Enter reconnects", host.data.alias),
+        None => format!("{} — not connected", host.data.alias),
+    };
+    frame.render_widget(overview(app, host).block(block(&title, false)), area);
+}
 
-    let Some(session) = sessions.get(&host.id) else {
-        let title = format!("{} — not connected", host.data.alias);
-        let block = block(&title, false);
-        frame.render_widget(overview(app, host).block(block), area);
+/// One terminal column: the session of the connection it shows.
+fn draw_column(
+    frame: &mut Frame,
+    app: &mut App,
+    sessions: &HashMap<i64, Session>,
+    index: usize,
+    area: Rect,
+) {
+    app.column_areas.push((index, Block::bordered().inner(area)));
+    let focused = pane_focused(app, Focus::Terminal) && index == app.active_column;
+    let id = app.columns[index];
+    let Some(host) = app.host(id) else { return };
+    let number = index + 1;
+
+    let Some(session) = sessions.get(&id) else {
+        let title = format!("{number} {} — no session · Enter connects", host.data.alias);
+        let text = vec![Line::default(), Line::from(vec!["  ".into(), host.data.target().bold()])];
+        frame.render_widget(Paragraph::new(text).block(block(&title, focused)), area);
         return;
     };
 
     let parser = session.parser();
     let screen = parser.screen();
     let mut title = match session.exit() {
-        None => format!("● {} — {}", host.data.alias, host.data.target()),
-        Some(exit) => format!("{} — {exit} · Enter reconnects · x closes", host.data.alias),
+        None => format!("{number} ● {} — {}", host.data.alias, host.data.target()),
+        Some(exit) => format!("{number} {} — {exit} · Enter reconnects", host.data.alias),
     };
     if screen.scrollback() > 0 {
         title.push_str(&format!(" · scrolled back {}", screen.scrollback()));
     }
+    if app.zoomed {
+        title.push_str(" · zoomed (Alt-z)");
+    }
     let mut block = block(&title, focused);
     if session.exit().is_none() {
-        block = block.title_style(Style::new().fg(CONNECTED).bold());
+        let style = Style::new().fg(CONNECTED);
+        block = block.title_style(if focused { style.bold() } else { style });
     }
     let show_cursor =
         focused && session.exit().is_none() && !screen.hide_cursor() && screen.scrollback() == 0;
@@ -288,20 +332,26 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(Line::from(format!(" {}", status.text)).fg(color), area);
         return;
     }
-    let keys: &[(&str, &str)] = match (&app.mode, app.focus, app.selected_session()) {
+    let active = app.active_host_id().and_then(|id| app.sessions.get(&id).copied());
+    let keys: &[(&str, &str)] = match (&app.mode, app.focus, active) {
         (Mode::Search, ..) => &[("Enter", "connect"), ("↑↓ Ctrl-j/k", "move"), ("Esc", "done searching")],
-        (_, Focus::Terminal, Some(SessionState::Ended)) => {
-            &[("Enter", "reconnect"), ("x", "close"), ("Esc Alt-h", "back to list")]
-        }
-        (_, Focus::Terminal, _) => &[
-            ("Alt-h", "list"),
-            ("Alt-j/k", "next/prev session"),
-            ("", "all other keys go to the session"),
+        (_, Focus::Terminal, Some(SessionState::Alive)) => &[
+            ("Alt-h/l", "column"),
+            ("Alt-1..9", "jump"),
+            ("Alt-v", "split"),
+            ("Alt-w", "close column"),
+            ("Alt-z", "zoom"),
+            ("Alt-j/k", "session"),
+            ("", "other keys go to ssh"),
         ],
+        (_, Focus::Terminal, _) => {
+            &[("Enter", "connect"), ("Esc Alt-h", "back"), ("Alt-w", "close column")]
+        }
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
         _ => &[
             ("Enter", "connect"),
-            ("Alt-l", "terminal"),
+            ("Alt-v", "new column"),
+            ("Alt-l", "columns"),
             ("/", "search"),
             ("a", "add"),
             ("e", "edit"),
@@ -346,9 +396,14 @@ fn draw_confirm(frame: &mut Frame, question: Vec<Span<'_>>, action: &str) {
 
 fn draw_help(frame: &mut Frame) {
     const HELP: &[(&str, &str)] = &[
-        ("Enter", "open the session in the right pane (or focus it)"),
-        ("Alt-h / Alt-l", "focus list / terminal"),
-        ("Alt-j / Alt-k", "next / previous session"),
+        ("Enter", "show the connection in the active column"),
+        ("Alt-v", "show it in a new column (split)"),
+        ("Alt-h / Alt-l", "column left / right (the list is the first)"),
+        ("Alt-1 … Alt-9", "jump to column N"),
+        ("Alt-j / Alt-k", "next / previous session in the column"),
+        ("Alt-w", "close the column (the session keeps running)"),
+        ("Alt-z", "zoom the active column"),
+        ("Alt-H / Alt-L", "move the column left / right"),
         ("x", "close the session"),
         ("f", "full-screen ssh (back to sshh on exit)"),
         ("", ""),

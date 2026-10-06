@@ -5,8 +5,8 @@ SSH connection manager for the terminal, written in Rust.
 - Use it **just like `ssh`**: `sshh user@host`, `sshh -p 2222 -J bastion web`, etc.
 - When the connection is new, a **wizard** offers to save it with a name, description, tags and notes.
 - Without arguments it opens a **TUI** (lazygit style) with fuzzy search, keyboard navigation (vim
-  style) and mouse support, where you can keep **several ssh sessions open side by side** with the
-  connection list.
+  style) and mouse support, where you can keep **several ssh sessions open side by side, in
+  columns**, next to the connection list.
 - **It doesn't reimplement SSH**: it always runs the system `ssh`, so your `~/.ssh/config`,
   `ssh-agent`, `ProxyJump`, `ControlMaster`, `known_hosts`, FIDO keys, etc. keep working.
 - **It doesn't store passwords** or any secrets: use your keys and your agent as usual.
@@ -116,24 +116,25 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
 `sshh` without arguments opens a lazygit-style layout:
 
 ```
-╭ Search ────────────╮╭ ● web — deploy@10.0.0.5:2222 ─────────────────╮
-╰────────────────────╯│deploy@web:~$ uptime                           │
-╭ Connections ───────╮│ 12:01 up 3 days, load average: 0.12           │
-│● web  Web          ││deploy@web:~$ █                                │
-│● db1  Database     ││                                               │
-│  bastion           ││                                               │
-╰────────────────────╯│                                               │
-╭ Details ───────────╮│                                               │
-│Web production      ││                                               │
-│Target deploy@…     ││                                               │
-╰────────────────────╯╰───────────────────────────────────────────────╯
+╭ Search ──────────╮╭ 1 ● web ───────────────╮╭ 2 ● db1 ───────────────╮
+╰──────────────────╯│deploy@web:~$ uptime    ││postgres@db1:~$ psql    │
+╭ Connections ─────╮│ 12:01 up 3 days        ││psql (16.2)             │
+│● web  Web        ││deploy@web:~$ █         ││postgres=#              │
+│● db1  Database   ││                        ││                        │
+│● bastion         ││                        ││                        │
+╰──────────────────╯│                        ││                        │
+╭ Details ─────────╮│                        ││                        │
+│Web production    ││                        ││                        │
+╰──────────────────╯╰────────────────────────╯╰────────────────────────╯
+   list = column 0      ◄── Alt-h ── Alt-l ──►     Alt-1 … Alt-9
 ```
 
 - **Left**: search, a simplified connection list and the details of the selected one (target,
   options, tags, usage, notes).
-- **Right**: the **embedded ssh session** of the selected connection. You can have several sessions
-  open at once; connections with a live session are marked with a green `●` (a grey `○` means the
-  session ended). Without a session, the pane shows the available actions and the latest connections.
+- **Right**: **terminal columns**, each showing the embedded ssh session of one connection, side by
+  side. Connections with a live session are marked with a green `●` in the list (a grey `○` means
+  the session ended). Closing a column doesn't close its session. With no column open, the right side
+  shows the actions and latest connections of the selected connection.
 
 Each embedded session is the system `ssh` running inside a pseudo terminal, so everything works as in
 a normal terminal (passwords, host key prompts, agent, full-screen programs like `vim`, `less` or
@@ -147,18 +148,33 @@ The list can be sorted by recent use, by number of uses or by alias. If the outp
 
 Shortcuts follow the conventions of vim, less, lazygit and fzf.
 
+Terminal columns (these work from anywhere, also while typing in a session):
+
 | Key | Action |
 |---|---|
-| `Enter` | open the session in the right pane (or focus it if it's already open; reconnect if it ended) |
-| `Alt-l` / `Alt-h` | focus the terminal / back to the list (works from anywhere) |
-| `Alt-j` / `Alt-k` | next / previous open session |
-| `x` | close the selected session (asks first) |
+| `Enter` (in the list) | show the selected connection in the active column (opens its session; focuses it if it's already in a column; reconnects if it ended) |
+| `Alt-v` | show the selected connection in a **new column** right of the active one (split) |
+| `Alt-h` / `Alt-l` | column left / right; the list is the leftmost column |
+| `Alt-1` … `Alt-9` | jump to column N |
+| `Alt-j` / `Alt-k` | in a column: show the next / previous session there (sessions visible in other columns are skipped); in the list: select the next / previous connection with a session |
+| `Alt-w` | close the column (the session keeps running) |
+| `Alt-z` | zoom: the active column takes the whole screen (again to go back) |
+| `Alt-Shift-h` / `Alt-Shift-l` | move the active column left / right |
+
+Columns share the width equally; each one needs at least 40 characters, so the number of columns
+depends on the size of your terminal (up to 9). A session is shown in at most one column.
+
+List and general keys:
+
+| Key | Action |
+|---|---|
+| `x` | close the selected connection's session (asks first) |
 | `f` | full-screen ssh, as a plain terminal; you come back to `sshh` when it exits |
 | `j` / `k`, `↓` / `↑` | move |
 | `gg` / `G` | go to top / bottom |
 | `Ctrl-d` / `Ctrl-u` | half page down / up |
 | `Ctrl-f` / `Ctrl-b`, `PgDn` / `PgUp` | page down / up |
-| `Tab` / `Shift-Tab` | next / previous pane: list → details → terminal (the terminal only if the connection has a session; inside it `Tab` goes to ssh, leave with `Alt-h`) |
+| `Tab` / `Shift-Tab` | next / previous pane: list → details → active column (if any; inside it `Tab` goes to ssh, leave with `Alt-h`) |
 | `/` | search |
 | `a` | add a connection |
 | `e` | edit |
@@ -173,9 +189,10 @@ Shortcuts follow the conventions of vim, less, lazygit and fzf.
 | `Esc` | go back one level / clear the search (never quits) |
 | `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
 
-While the **terminal has focus, every key goes to the ssh session** (including `Esc`, `Ctrl-c`, `q`
-and `Ctrl-w`), except `Alt-h`/`Alt-l`/`Alt-j`/`Alt-k`. When a session has ended, `Enter` reconnects
-and `Esc` goes back to the list.
+While a **terminal column has focus, every key goes to its ssh session** (including `Esc`, `Ctrl-c`,
+`q`, `Tab` and `Ctrl-w`), except the `Alt` shortcuts above. They were chosen not to clash with bash /
+readline (`Alt-.`, `Alt-b`, `Alt-f`, `Alt-d`… still reach the shell). When a session has ended,
+`Enter` reconnects and `Esc` goes back to the list.
 
 ### Search
 
@@ -194,8 +211,8 @@ are highlighted.
 |---|---|
 | Click on a row | select |
 | Double click | open the session |
-| Click on the session | focus the terminal |
-| Wheel | move · scroll the details · scroll back the session history |
+| Click on a column | focus it |
+| Wheel | move · scroll the details · scroll back the history of the column under the pointer |
 | Click on the search box | search |
 | Click on the details | focus them |
 | Click on a form field | edit that field |
@@ -497,6 +514,7 @@ tmux capture-pane -p -t t
 - [x] **Phase 4**: history, JSON export/import, `~/.ssh/config` import.
 - [x] **Phase 5**: generated ssh_config file for `Include` and quick actions (sftp, ssh-copy-id).
 - [x] **Phase 6**: embedded ssh sessions next to the list (lazygit style), several at once.
+- [x] **Phase 7**: terminal columns side by side (split, navigate, zoom, move, close).
 
 Pending ideas: "don't ask again" for a destination in the wizard, `sshh add` without arguments
 opening the form, configurable shortcuts, keeping sessions alive after quitting (a background

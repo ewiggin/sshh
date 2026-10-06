@@ -57,7 +57,7 @@ fn event_loop(
         if redraw || dirty.swap(false, Ordering::AcqRel) {
             sync_sessions(sessions, app);
             terminal.draw(|frame| ui::draw(frame, app, sessions))?;
-            redraw = resize_selected(sessions, app);
+            redraw = resize_columns(sessions, app);
         }
         let timeout = if sessions.is_empty() { Duration::from_secs(1) } else { Duration::from_millis(15) };
         if !event::poll(timeout)? {
@@ -93,20 +93,23 @@ fn sync_sessions(sessions: &mut Sessions, app: &mut App) {
         .iter()
         .map(|(id, s)| (*id, if s.exit().is_none() { SessionState::Alive } else { SessionState::Ended }))
         .collect();
-    if app.focus == Focus::Terminal && app.selected_session().is_none() {
+    if app.focus == Focus::Terminal && app.columns.is_empty() {
         app.focus = Focus::List;
     }
 }
 
-/// Fits the visible session to the right pane. Returns true if it changed.
-fn resize_selected(sessions: &mut Sessions, app: &App) -> bool {
-    let area = app.terminal_area;
-    let Some(session) = app.selected_host().and_then(|h| sessions.get_mut(&h.id)) else {
-        return false;
-    };
-    let before = session.parser().screen().size();
-    session.resize(area.height, area.width);
-    before != session.parser().screen().size()
+/// Fits every visible session to its column. Returns true if any changed.
+fn resize_columns(sessions: &mut Sessions, app: &App) -> bool {
+    let mut changed = false;
+    for (index, area) in &app.column_areas {
+        let Some(session) = app.columns.get(*index).and_then(|id| sessions.get_mut(id)) else {
+            continue;
+        };
+        let before = session.parser().screen().size();
+        session.resize(area.height, area.width);
+        changed |= before != session.parser().screen().size();
+    }
+    changed
 }
 
 /// Loads the history of the selected connection if it changed.
@@ -137,9 +140,12 @@ fn open_session(
     dirty: &Arc<AtomicBool>,
     host: &Host,
 ) -> Result<()> {
-    let area = app.terminal_area;
+    // Approximate size; the first draw fits it to its column.
+    let area = app.columns_area;
+    let columns = app.columns.len().max(1) as u16;
+    let (rows, cols) = (area.height.saturating_sub(2), (area.width / columns).saturating_sub(2));
     let spawned = connect::session_command(db, host)
-        .and_then(|(ssh, args)| Session::spawn(&ssh, &args, area.height, area.width, Arc::clone(dirty)));
+        .and_then(|(ssh, args)| Session::spawn(&ssh, &args, rows.max(10), cols.max(20), Arc::clone(dirty)));
     match spawned {
         Ok(session) => {
             // Replaces a finished session of the same connection, if any.
@@ -147,6 +153,9 @@ fn open_session(
             reload_hosts(db, app)?;
         }
         Err(e) => {
+            if !sessions.contains_key(&host.id) {
+                app.remove_column_of(host.id);
+            }
             app.focus = Focus::List;
             app.error(format!("Could not open a session: {e:#}"));
         }
@@ -202,7 +211,6 @@ fn handle_request(
     dirty: &Arc<AtomicBool>,
     request: Request,
 ) -> Result<()> {
-    let selected = app.selected_host().map(|h| h.id);
     match request {
         Request::Save { id, data } => {
             let saved = match id {
@@ -252,18 +260,18 @@ fn handle_request(
                 app.info("Session closed");
             }
         }
-        Request::Input(key) => {
-            if let Some(session) = selected.and_then(|id| sessions.get_mut(&id)) {
+        Request::Input(id, key) => {
+            if let Some(session) = sessions.get_mut(&id) {
                 session.send_key(key);
             }
         }
-        Request::Paste(text) => {
-            if let Some(session) = selected.and_then(|id| sessions.get_mut(&id)) {
+        Request::Paste(id, text) => {
+            if let Some(session) = sessions.get_mut(&id) {
                 session.paste(&text);
             }
         }
-        Request::Scroll(delta) => {
-            if let Some(session) = selected.and_then(|id| sessions.get_mut(&id)) {
+        Request::Scroll(id, delta) => {
+            if let Some(session) = sessions.get_mut(&id) {
                 session.scroll(delta);
             }
         }
