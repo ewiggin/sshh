@@ -230,25 +230,104 @@ fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Sessio
     }
 }
 
+/// Right side when no column is open: the logo and the selected connection's
+/// actions and latest connections.
 fn draw_overview(frame: &mut Frame, app: &App, sessions: &HashMap<i64, Session>, area: Rect) {
-    let Some(host) = app.selected_host() else {
-        let text = if app.hosts.is_empty() {
-            "No saved connections.\n\nPress 'a' to add one, or import your ~/.ssh/config\nwith `sshh import-ssh-config`."
-        } else {
-            "No connection selected."
-        };
-        let block = block("sshh", false);
-        let [middle] = Layout::vertical([Constraint::Length(4)]).flex(Flex::Center).areas(block.inner(area));
-        frame.render_widget(block, area);
-        frame.render_widget(Paragraph::new(text).dim().centered(), middle);
-        return;
+    let host = app.selected_host();
+    let title = match host {
+        None => "sshh".to_string(),
+        Some(host) => match sessions.get(&host.id).map(|s| s.exit().is_none()) {
+            Some(true) => format!("{} — session running · Space shows it", host.data.alias),
+            Some(false) => format!("{} — session ended · Space reconnects", host.data.alias),
+            None => format!("{} — not connected", host.data.alias),
+        },
     };
-    let title = match sessions.get(&host.id).map(|s| s.exit().is_none()) {
-        Some(true) => format!("{} — session running · Space shows it", host.data.alias),
-        Some(false) => format!("{} — session ended · Space reconnects", host.data.alias),
-        None => format!("{} — not connected", host.data.alias),
+    let block = block(&title, false);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let (body, history) = match host {
+        Some(host) => (overview_lines(host), history_lines(app)),
+        None if app.hosts.is_empty() => (
+            vec![
+                Line::from("No saved connections.".bold()),
+                Line::default(),
+                Line::from("Press 'a' to add one, or import your ~/.ssh/config"),
+                Line::from("with `sshh import-ssh-config`."),
+            ],
+            Vec::new(),
+        ),
+        None => (vec![Line::from("No connection selected.".dim())], Vec::new()),
     };
-    frame.render_widget(overview(app, host).block(block(&title, false)), area);
+
+    // When space is short the history goes first, then the logo.
+    let logo = logo_lines();
+    let height = usize::from(inner.height);
+    let wide = inner.width >= 36;
+    let fits = |lens: &[usize]| lens.iter().map(|n| n + 1).sum::<usize>() <= height;
+    let (show_logo, show_history) = if wide && fits(&[logo.len(), body.len(), history.len()]) {
+        (true, true)
+    } else if wide && fits(&[logo.len(), body.len()]) {
+        (true, false)
+    } else {
+        (false, true)
+    };
+
+    // The actions and the history are centred together so they line up.
+    let mut info = body;
+    if show_history && !history.is_empty() {
+        info.push(Line::default());
+        info.extend(history);
+    }
+    let mut lines = Vec::new();
+    if show_logo {
+        lines.extend(center_block(logo, inner.width));
+        lines.push(Line::default());
+    }
+    lines.extend(center_block(info, inner.width));
+    let top = inner.height.saturating_sub(lines.len() as u16) / 2;
+    let area = Rect { y: inner.y + top, height: inner.height - top, ..inner };
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// "SSHH" in the figlet "ANSI Shadow" font.
+const WORDMARK: [&str; 6] = [
+    "███████╗███████╗██╗  ██╗██╗  ██╗",
+    "██╔════╝██╔════╝██║  ██║██║  ██║",
+    "███████╗███████╗███████║███████║",
+    "╚════██║╚════██║██╔══██║██╔══██║",
+    "███████║███████║██║  ██║██║  ██║",
+    "╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝",
+];
+const TAGLINE: &str = "ssh connection manager";
+
+/// The logo: the wordmark in a cyan → magenta gradient and the tagline.
+fn logo_lines() -> Vec<Line<'static>> {
+    let gradient = [51, 45, 39, 69, 135, 171];
+    let mut lines: Vec<Line> = WORDMARK
+        .iter()
+        .zip(gradient)
+        .map(|(row, color)| Line::from(row.fg(Color::Indexed(color))))
+        .collect();
+    let width = WORDMARK[0].chars().count();
+    let pad = (width - TAGLINE.len()) / 2;
+    lines.push(Line::default());
+    lines.push(Line::from(format!("{}{TAGLINE}", " ".repeat(pad)).dim()));
+    lines
+}
+
+/// Indents `lines` so that they are centred as a block in `width` columns
+/// (centring each line on its own would distort ASCII art).
+fn center_block(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    let block_width = lines.iter().map(Line::width).max().unwrap_or(0);
+    let pad = usize::from(width).saturating_sub(block_width) / 2;
+    lines
+        .into_iter()
+        .map(|mut line| {
+            line.spans.insert(0, Span::raw(" ".repeat(pad)));
+            line
+        })
+        .collect()
 }
 
 /// One terminal column: the session of the connection it shows.
@@ -297,14 +376,12 @@ fn draw_column(
     frame.render_widget(terminal, area);
 }
 
-fn overview<'a>(app: &App, host: &'a Host) -> Paragraph<'a> {
-    let now = db::now();
+fn overview_lines(host: &Host) -> Vec<Line<'static>> {
     let key = |k: &'static str, desc: &'static str| {
-        Line::from(vec![format!("  {k:<7}").fg(ACCENT).bold(), desc.into()])
+        Line::from(vec![format!("{k:<7}").fg(ACCENT).bold(), desc.into()])
     };
-    let mut lines = vec![
-        Line::default(),
-        Line::from(vec!["  ".into(), host.data.target().bold()]),
+    vec![
+        Line::from(vec![host.data.alias.clone().bold(), " — ".dim(), host.data.target().into()]),
         Line::default(),
         key("Space", "open a session here"),
         key("Alt-v", "open it in a new column"),
@@ -312,19 +389,23 @@ fn overview<'a>(app: &App, host: &'a Host) -> Paragraph<'a> {
         key("s", "sftp"),
         key("c", "install your public key (ssh-copy-id)"),
         key("Enter", "edit (also e)"),
-    ];
-    if !app.history.is_empty() {
-        lines.push(Line::default());
-        lines.push(Line::from("  Recent connections".bold().fg(ACCENT)));
-        for entry in &app.history {
-            let args: Vec<String> = entry.args.iter().map(|a| shell_quote(a)).collect();
-            lines.push(Line::from(vec![
-                format!("  {:<12}", relative_time(now - entry.connected_at)).dim(),
-                format!("sshh {}", args.join(" ")).into(),
-            ]));
-        }
+    ]
+}
+
+fn history_lines(app: &App) -> Vec<Line<'static>> {
+    if app.history.is_empty() {
+        return Vec::new();
     }
-    Paragraph::new(lines).wrap(Wrap { trim: false })
+    let now = db::now();
+    let mut lines = vec![Line::from("Recent connections".bold().fg(ACCENT))];
+    for entry in &app.history {
+        let args: Vec<String> = entry.args.iter().map(|a| shell_quote(a)).collect();
+        lines.push(Line::from(vec![
+            format!("{:<12}", relative_time(now - entry.connected_at)).dim(),
+            format!("sshh {}", args.join(" ")).into(),
+        ]));
+    }
+    lines
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
