@@ -28,10 +28,12 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   disables it). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
 - `db`: SQLite + migrations via `PRAGMA user_version` (append to `MIGRATIONS`, never edit existing ones).
 - `tui`: `sshh` without args, and the wizard. Lazygit-style layout: search + list + details on the
-  left, terminal columns on the right (`App::columns` = `SessionKey`s left to right, i.e. connection
+  left, terminal columns on the right. `App::columns: Vec<Vec<SessionKey>>` = columns left to right,
+  each a stack of panes top to bottom; `active_column`/`active_row`, `pane_areas` (by `Pane` =
+  (column, row)). Each `SessionKey` is a connection
   id + `SessionKind` (Ssh / Sftp): a connection can have both; `App::host_session` aggregates them,
-  `active_column`, `zoomed`). The list is "column 0" for Alt-h/l. Requests that target a session carry
-  its id (`Input`, `Paste`, `Scroll`); the loop resizes each session to its `App::column_areas` rect.
+  `zoomed` = full screen). The list is "column 0" for Alt-h/l. Requests that target a session carry
+  its id (`Input`, `Paste`, `Scroll`); the loop resizes each session to its `App::pane_areas` rect.
   `app.rs` = state + events (testable without a terminal); side effects (DB, clipboard, $EDITOR,
   sessions) are requested through `App::request` and run by `mod.rs`, which owns the sessions and
   publishes their state in `App::sessions`. `session.rs` = ssh in a PTY (portable-pty) + vt100
@@ -50,9 +52,10 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
-  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active column. Columns: `Alt-v` split, `Alt-h/l` or `Alt-←/→` move,
-  `Alt-1..9` jump, `Alt-j/k` change the column's session, `Alt-w` close column, `Alt-f`/`Alt-z` full
-  screen (zoom), `Alt-H/L` move column. `Alt-f` was the user's choice despite clashing with readline;
+  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active pane. Panes: `Alt-v` new column, `Alt--` new pane
+  below the last column, `Alt-h/j/k/l` (+ arrows) focus like vim, `Alt-1..9` jump to column,
+  `Alt-J` stack below the right (or left) column, `Alt-K` unstack, `Alt-H/L` move column, `Alt-n/p`
+  change the pane's session, `Alt-w` close pane, `Alt-f`/`Alt-z` full screen (zoom). `Alt-f` was the user's choice despite clashing with readline;
   avoid taking more readline Alt keys (`Alt-.`, `b`, `d`, `<`, `>`).
   With the terminal focused every other key goes to ssh. `Esc` always goes back one level (except in
   the terminal); only `q`/`Ctrl-c` quit (confirming if sessions are alive).

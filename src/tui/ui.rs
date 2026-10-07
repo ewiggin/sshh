@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap};
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use super::app::{App, Focus, ListTab, Mode, SessionKey, SessionKind, SessionState};
+use super::app::{App, Focus, ListTab, Mode, Pane, SessionKey, SessionKind, SessionState};
 use super::session::Session;
 use crate::cli::{format_date, relative_time};
 use crate::connect::shell_quote;
@@ -30,14 +30,14 @@ const CONNECTED: Color = Color::Green;
 pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Session>) {
     let [main, footer] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
-    app.column_areas.clear();
+    app.pane_areas.clear();
     if app.zoomed && !app.columns.is_empty() {
-        // Only the active column, on the whole screen.
+        // Only the active pane, on the whole screen.
         app.rows_area = Rect::default();
         app.search_area = Rect::default();
         app.detail_area = Rect::default();
         app.columns_area = main;
-        draw_column(frame, app, sessions, app.active_column, main);
+        draw_pane(frame, app, sessions, (app.active_column, app.active_row), main);
     } else {
         let left_width = (main.width * 24 / 100).clamp(24, 40).min(main.width);
         let [left, right] =
@@ -331,9 +331,12 @@ fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey,
         draw_overview(frame, app, area);
         return;
     }
-    let areas = Layout::horizontal(vec![Constraint::Fill(1); app.columns.len()]).split(area);
-    for (index, column) in areas.iter().enumerate() {
-        draw_column(frame, app, sessions, index, *column);
+    let columns = Layout::horizontal(vec![Constraint::Fill(1); app.columns.len()]).split(area);
+    for (c, column) in columns.iter().enumerate() {
+        let panes = Layout::vertical(vec![Constraint::Fill(1); app.columns[c].len()]).split(*column);
+        for (r, pane) in panes.iter().enumerate() {
+            draw_pane(frame, app, sessions, (c, r), *pane);
+        }
     }
 }
 
@@ -445,19 +448,24 @@ fn center_block(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// One terminal column: the session of the connection it shows.
-fn draw_column(
+/// One pane of the terminal columns: the session it shows.
+fn draw_pane(
     frame: &mut Frame,
     app: &mut App,
     sessions: &HashMap<SessionKey, Session>,
-    index: usize,
+    (column, row): Pane,
     area: Rect,
 ) {
-    app.column_areas.push((index, Block::bordered().inner(area)));
-    let focused = pane_focused(app, Focus::Terminal) && index == app.active_column;
-    let key = app.columns[index];
+    app.pane_areas.push(((column, row), Block::bordered().inner(area)));
+    let focused =
+        pane_focused(app, Focus::Terminal) && (column, row) == (app.active_column, app.active_row);
+    let key = app.columns[column][row];
     let Some(host) = app.host(key.host) else { return };
-    let number = index + 1;
+    // "2" for a column with a single pane, "2.1", "2.2"… when they are stacked.
+    let number = match app.columns[column].len() {
+        1 => (column + 1).to_string(),
+        _ => format!("{}.{}", column + 1, row + 1),
+    };
     // ssh columns show the target; sftp ones say so.
     let what = match key.kind {
         SessionKind::Ssh => host.data.target(),
@@ -577,17 +585,17 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             ]
         }
         (_, Focus::Terminal, Some(SessionState::Alive)) => &[
-            ("Alt-←/→", "column"),
-            ("Alt-1..9", "jump"),
-            ("Alt-v", "split"),
-            ("Alt-w", "close column"),
+            ("Alt-hjkl", "move"),
+            ("Alt-v/-", "split"),
+            ("Alt-J/K", "stack"),
+            ("Alt-w", "close"),
             ("Alt-f", "full screen"),
             ("Alt-s", "history"),
-            ("Alt-j/k", "session"),
+            ("Alt-n/p", "session"),
             ("", "other keys go to ssh"),
         ],
         (_, Focus::Terminal, _) => {
-            &[("Enter", "connect"), ("Esc Alt-h", "back"), ("Alt-w", "close column")]
+            &[("Enter", "connect"), ("Esc Alt-h", "back"), ("Alt-w", "close pane")]
         }
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
         _ if app.tab == ListTab::Tags => &[
@@ -600,8 +608,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ],
         _ => &[
             ("Space", "connect"),
-            ("Alt-v", "new column"),
-            ("Alt-l", "columns"),
+            ("Alt-v/-", "split"),
+            ("Alt-l", "panes"),
             ("/", "search"),
             ("a", "add"),
             ("Enter/e", "edit"),
@@ -647,14 +655,17 @@ fn draw_confirm(frame: &mut Frame, question: Vec<Span<'_>>, action: &str) {
 
 fn draw_help(frame: &mut Frame) {
     const HELP: &[(&str, &str)] = &[
-        ("Space", "show the connection in the active column"),
-        ("Alt-v", "show it in a new column (split)"),
-        ("Alt-←/→ Alt-h/l", "column left / right (the list is the first)"),
+        ("Space", "show the connection in the active pane"),
+        ("Alt-v", "show it in a new column, right of the active one"),
+        ("Alt--", "show it in a new pane below the last column"),
+        ("Alt-h/j/k/l", "focus left / down / up / right (also Alt-arrows)"),
         ("Alt-1 … Alt-9", "jump to column N"),
-        ("Alt-j / Alt-k", "next / previous session in the column"),
-        ("Alt-w", "close the column (the session keeps running)"),
-        ("Alt-f / Alt-z", "full screen for the active column (toggle)"),
+        ("Alt-J", "stack the pane below the column on its right (or left)"),
+        ("Alt-K", "take the pane out into its own column"),
         ("Alt-H / Alt-L", "move the column left / right"),
+        ("Alt-n / Alt-p", "next / previous session in the pane"),
+        ("Alt-w", "close the pane (the session keeps running)"),
+        ("Alt-f / Alt-z", "full screen for the active pane (toggle)"),
         ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
         ("x", "close the connection's sessions (ssh and sftp)"),
         ("f", "full-screen ssh (back to sshh on exit)"),

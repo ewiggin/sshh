@@ -103,11 +103,12 @@ fn sync_sessions(sessions: &mut Sessions, app: &mut App) {
     }
 }
 
-/// Fits every visible session to its column. Returns true if any changed.
+/// Fits every visible session to its pane. Returns true if any changed.
 fn resize_columns(sessions: &mut Sessions, app: &App) -> bool {
     let mut changed = false;
-    for (index, area) in &app.column_areas {
-        let Some(session) = app.columns.get(*index).and_then(|key| sessions.get_mut(key)) else {
+    for ((column, row), area) in &app.pane_areas {
+        let key = app.columns.get(*column).and_then(|panes| panes.get(*row));
+        let Some(session) = key.and_then(|key| sessions.get_mut(key)) else {
             continue;
         };
         let before = session.parser().screen().size();

@@ -163,45 +163,61 @@ Sessions follow the size of their column, keep 5000 lines of history
 Quitting
 .B sshh
 closes them, after asking.
-.SS Columns
+.SS Columns and panes
+A column can hold several panes stacked vertically.
 These keys work from anywhere, also while typing in a session.
 .TP
 .B Space
-(in the list) Show the selected connection in the active column, opening
-its session.
-If it is already in a column, focus that column; if its session ended,
+(in the list) Show the selected connection in the active pane, opening its
+session.
+If it is already in a pane, focus that pane; if its session ended,
 reconnect.
 .TP
 .B Alt\-v
 Show the selected connection in a new column right of the active one.
 Each column needs at least 40 characters; up to 9 columns.
 .TP
-.BR Alt\-Left ", " Alt\-Right ", " Alt\-h ", " Alt\-l
-Move to the column on the left or right.
-The list is the leftmost column.
+.B Alt\-\-
+Show the selected connection in a new pane below the last column.
+Each pane needs at least 6 lines.
+.TP
+.BR Alt\-h ", " Alt\-j ", " Alt\-k ", " Alt\-l
+(or Alt and the arrows) Focus the pane on the left, below, above or on the
+right.
+The list is the leftmost column; there,
+.B Alt\-j
+and
+.B Alt\-k
+select the next or previous connection with a session.
 .TP
 .BR Alt\-1 " .. " Alt\-9
 Jump to column
 .IR N .
 .TP
-.BR Alt\-j ", " Alt\-k
-In a column: show the next or previous session there, skipping sessions
-visible in other columns.
-In the list: select the next or previous connection with a session.
+.B Alt\-J
+(Alt\-Shift\-j) Stack the active pane below the column on its right, or on
+its left if it is the last one.
 .TP
-.B Alt\-w
-Close the active column.
-The session keeps running.
-.TP
-.BR Alt\-f ", " Alt\-z
-Toggle full screen for the active column, inside
-.BR sshh .
+.B Alt\-K
+(Alt\-Shift\-k) Take the active pane out of its stack into its own column.
 .TP
 .BR Alt\-H ", " Alt\-L
 (Alt\-Shift\-h, Alt\-Shift\-l) Move the active column left or right.
 .TP
+.BR Alt\-n ", " Alt\-p
+Show the next or previous session in the active pane, skipping sessions
+visible in other panes.
+.TP
+.B Alt\-w
+Close the active pane; its neighbours take the space.
+The session keeps running.
+.TP
+.BR Alt\-f ", " Alt\-z
+Toggle full screen for the active pane, inside
+.BR sshh .
+.TP
 .B Alt\-s
-History mode for the active column: move with
+History mode for the active pane: move with
 .BR j / k ,
 .BR Ctrl\-d / Ctrl\-u ,
 .BR gg / G ;
@@ -220,7 +236,7 @@ leave with
 or
 .BR Esc .
 .PP
-While a column has focus, every other key goes to its ssh session,
+While a pane has focus, every other key goes to its session,
 including
 .BR Esc ,
 .BR Ctrl\-c ,

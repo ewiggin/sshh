@@ -233,22 +233,36 @@ The list can be sorted by recent use, by number of uses or by alias. If the outp
 
 Shortcuts follow the conventions of vim, less, lazygit and fzf.
 
-Terminal columns (these work from anywhere, also while typing in a session):
+Terminal columns and panes (these work from anywhere, also while typing in a session). A column
+can hold several panes stacked vertically, like tmux or vim splits:
+
+```
+╭ 1.1 ● web ──────╮╭ 2 ● db1 ────────╮
+│                 ││                 │
+╰─────────────────╯│                 │
+╭ 1.2 ● api ──────╮│                 │
+│                 ││                 │
+╰─────────────────╯╰─────────────────╯
+```
 
 | Key | Action |
 |---|---|
-| `Space` (in the list) | show the selected connection in the active column (opens its session; focuses it if it's already in a column; reconnects if it ended) |
-| `Alt-v` | show the selected connection in a **new column** right of the active one (split) |
-| `Alt-←` / `Alt-→` (or `Alt-h` / `Alt-l`) | column left / right; the list is the leftmost column |
+| `Space` (in the list) | show the selected connection in the active pane (opens its session; focuses it if it's already in a pane; reconnects if it ended) |
+| `Alt-v` | show the selected connection in a **new column** right of the active one |
+| `Alt--` | show the selected connection in a **new pane below the last column** |
+| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` (or `Alt-arrows`) | focus the pane on the left / below / above / on the right; the list is the leftmost column (there, `Alt-j`/`Alt-k` select the next / previous connection with a session) |
 | `Alt-1` … `Alt-9` | jump to column N |
-| `Alt-j` / `Alt-k` | in a column: show the next / previous session there (sessions visible in other columns are skipped); in the list: select the next / previous connection with a session |
-| `Alt-w` | close the column (the session keeps running) |
-| `Alt-f` (or `Alt-z`) | full screen: the active column takes the whole screen, inside `sshh` (again to go back) |
+| `Alt-Shift-j` | stack the active pane below the column on its right (or on its left, if it's the last one) |
+| `Alt-Shift-k` | take the active pane out of its stack into its own column |
 | `Alt-Shift-h` / `Alt-Shift-l` | move the active column left / right |
-| `Alt-s` | history mode for the active column (see below) |
+| `Alt-n` / `Alt-p` | show the next / previous session in the active pane (sessions visible in other panes are skipped) |
+| `Alt-w` | close the pane; its neighbours take the space (the session keeps running) |
+| `Alt-f` (or `Alt-z`) | full screen: the active pane takes the whole screen, inside `sshh` (again to go back) |
+| `Alt-s` | history mode for the active pane (see below) |
 
-Columns share the width equally; each one needs at least 40 characters, so the number of columns
-depends on the size of your terminal (up to 9). A session is shown in at most one column.
+Columns share the width equally and need at least 40 characters each (up to 9 columns); panes in a
+column share its height and need at least 6 lines each. Pane titles show their position (`2` for a
+column with one pane, `1.1`, `1.2`… for stacked ones). A session is shown in at most one pane.
 
 List and general keys:
 
