@@ -211,8 +211,16 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
 
 Each embedded session is the system `ssh` running inside a pseudo terminal, so everything works as in
 a normal terminal (passwords, host key prompts, agent, full-screen programs like `vim`, `less` or
-`htop`). Sessions are resized with the pane, keep 5000 lines of scrollback (mouse wheel) and accept
-pastes. Quitting `sshh` closes them (it asks first).
+`htop`):
+
+- It answers the queries programs send to their terminal (device attributes, cursor position,
+  modes…), so programs like `fish` or `neovim` start without waiting for a timeout.
+- Programs that use the mouse (`htop`, `vim` with `mouse=a`, `mc`…) receive clicks, drags and the
+  wheel over their column. Hold `Shift` to select text with your terminal instead.
+- It's resized with its column, keeps 5000 lines of history (mouse wheel, or `Alt-s` for history
+  mode) and accepts pastes.
+
+Quitting `sshh` closes the sessions (it asks first).
 
 The UI only uses your terminal's 16-color palette and its default foreground and background, so it
 follows your terminal theme (for example, Omarchy themes): borders and shortcuts use the theme's
@@ -237,6 +245,7 @@ Terminal columns (these work from anywhere, also while typing in a session):
 | `Alt-w` | close the column (the session keeps running) |
 | `Alt-f` (or `Alt-z`) | full screen: the active column takes the whole screen, inside `sshh` (again to go back) |
 | `Alt-Shift-h` / `Alt-Shift-l` | move the active column left / right |
+| `Alt-s` | history mode for the active column (see below) |
 
 Columns share the width equally; each one needs at least 40 characters, so the number of columns
 depends on the size of your terminal (up to 9). A session is shown in at most one column.
@@ -273,6 +282,22 @@ word) and `Alt-←`/`Alt-→` (word movement in zsh/fish) are taken by `sshh`; u
 in the shell instead. Other readline keys (`Alt-.`, `Alt-b`, `Alt-d`…) still reach the shell. When a session has ended,
 `Enter` or `Space` reconnects and `Esc` goes back to the list.
 
+### History mode
+
+`Alt-s` freezes the active column's history and lets you move through it with the keyboard, like
+tmux's copy mode. The current line is highlighted and the column title shows the position.
+
+| Key | Action |
+|---|---|
+| `j` / `k`, `↓` / `↑` | move a line |
+| `Ctrl-d` / `Ctrl-u`, `Ctrl-f` / `Ctrl-b` | half page / page |
+| `gg` / `G` | oldest / newest line |
+| `/text` + `Enter` | search backwards (case insensitive) |
+| `n` / `N` | previous / next match |
+| `v` | start / cancel a line selection |
+| `y`, `Enter` | copy the selection (or the current line) to the clipboard and leave |
+| `q`, `Esc` | leave (`Esc` first cancels the selection) |
+
 ### Search
 
 `/` starts a **fuzzy** search over alias, name, user, host, description and tags. The list is
@@ -293,6 +318,7 @@ filtered while you type and matching letters are highlighted.
 | Double click | open the session (like `Space`) |
 | Click on a column | focus it |
 | Wheel | move · scroll the details · scroll back the history of the column under the pointer |
+| Click, drag, wheel on a program that uses the mouse | sent to that program (`Shift` to select text natively) |
 | Click on the search box | search |
 | Click on the details | focus them |
 | Click on a form field | edit that field |
@@ -599,7 +625,7 @@ tmux capture-pane -p -t t
 
 Pending ideas: "don't ask again" for a destination in the wizard, `sshh add` without arguments
 opening the form, configurable shortcuts, keeping sessions alive after quitting (a background
-server, like tmux), mouse forwarding to remote programs.
+server, like tmux), character-wise selection in history mode.
 
 ### Releasing
 

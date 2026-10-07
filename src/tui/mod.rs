@@ -24,7 +24,7 @@ use crate::model::{Host, HostData};
 use crate::{connect, include};
 use app::{App, External, Focus, Mode, Outcome, Request, SessionState};
 use form::{Form, FormEvent, FormKind};
-use session::Session;
+use session::{CopyAction, Session};
 
 /// Embedded sessions by connection id.
 type Sessions = HashMap<i64, Session>;
@@ -89,6 +89,10 @@ fn sync_sessions(sessions: &mut Sessions, app: &mut App) {
             app.info(format!("Session '{}': {}", host.data.alias, session.exit().unwrap_or_default()));
         }
     }
+    app.mouse_sessions =
+        sessions.iter().filter(|(_, s)| s.exit().is_none() && s.wants_mouse()).map(|(id, _)| *id).collect();
+    app.history_sessions =
+        sessions.iter().filter(|(_, s)| s.copy_mode().is_some()).map(|(id, _)| *id).collect();
     app.sessions = sessions
         .iter()
         .map(|(id, s)| (*id, if s.exit().is_none() { SessionState::Alive } else { SessionState::Ended }))
@@ -268,6 +272,26 @@ fn handle_request(
         Request::Paste(id, text) => {
             if let Some(session) = sessions.get_mut(&id) {
                 session.paste(&text);
+            }
+        }
+        Request::StartHistory(id) => {
+            if let Some(session) = sessions.get_mut(&id) {
+                session.start_copy_mode();
+            }
+        }
+        Request::HistoryKey(id, key) => {
+            let action = sessions.get_mut(&id).map(|s| s.copy_key(key));
+            if let Some(CopyAction::Copy(text)) = action {
+                let lines = text.lines().count().max(1);
+                match term::copy(&text) {
+                    Ok(()) => app.info(format!("Copied {lines} line(s)")),
+                    Err(e) => app.error(format!("Could not copy: {e:#}")),
+                }
+            }
+        }
+        Request::Mouse(id, event) => {
+            if let Some(session) = sessions.get_mut(&id) {
+                session.send_mouse(event);
             }
         }
         Request::Scroll(id, delta) => {

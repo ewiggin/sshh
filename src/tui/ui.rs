@@ -465,11 +465,21 @@ fn draw_column(
 
     let parser = session.parser();
     let screen = parser.screen();
-    let mut title = match session.exit() {
-        None => format!("{number} ● {} — {}", host.data.alias, host.data.target()),
-        Some(exit) => format!("{number} {} — {exit} · Enter reconnects", host.data.alias),
+    let copy = session.copy_mode();
+    let mut title = match (copy, session.exit()) {
+        (Some(copy), _) => {
+            let mut title = format!("{number} {} — history {}/{}", host.data.alias, copy.cursor + 1, copy.total());
+            if let Some(prompt) = &copy.prompt {
+                title.push_str(&format!(" · /{prompt}█"));
+            } else if let Some(message) = &copy.message {
+                title.push_str(&format!(" · {message}"));
+            }
+            title
+        }
+        (None, None) => format!("{number} ● {} — {}", host.data.alias, host.data.target()),
+        (None, Some(exit)) => format!("{number} {} — {exit} · Enter reconnects", host.data.alias),
     };
-    if screen.scrollback() > 0 {
+    if copy.is_none() && screen.scrollback() > 0 {
         title.push_str(&format!(" · scrolled back {}", screen.scrollback()));
     }
     if app.zoomed {
@@ -480,12 +490,29 @@ fn draw_column(
         let style = Style::new().fg(CONNECTED);
         block = block.title_style(if focused { style.bold() } else { style });
     }
-    let show_cursor =
-        focused && session.exit().is_none() && !screen.hide_cursor() && screen.scrollback() == 0;
+    let show_cursor = focused
+        && copy.is_none()
+        && session.exit().is_none()
+        && !screen.hide_cursor()
+        && screen.scrollback() == 0;
     let terminal = PseudoTerminal::new(screen)
         .block(block)
         .cursor(Cursor::default().visibility(show_cursor));
     frame.render_widget(terminal, area);
+
+    // History mode: highlight the cursor line or the selection.
+    if let Some(copy) = copy {
+        let inner = Block::bordered().inner(area);
+        let top = copy.top(screen.scrollback());
+        let (from, to) = copy.selected();
+        for row in 0..inner.height {
+            let line = top + usize::from(row);
+            if (from..=to).contains(&line) {
+                let rect = Rect { y: inner.y + row, height: 1, ..inner };
+                frame.buffer_mut().set_style(rect, Style::new().add_modifier(Modifier::REVERSED));
+            }
+        }
+    }
 }
 
 fn overview_lines(host: &Host) -> Vec<Line<'static>> {
@@ -529,12 +556,25 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let active = app.active_host_id().and_then(|id| app.sessions.get(&id).copied());
     let keys: &[(&str, &str)] = match (&app.mode, app.focus, active) {
         (Mode::Search, ..) => &[("", "type to filter"), ("↑↓ Ctrl-j/k", "move"), ("Enter/Esc", "back to list")],
+        (_, Focus::Terminal, Some(_))
+            if app.active_host_id().is_some_and(|id| app.history_sessions.contains(&id)) =>
+        {
+            &[
+                ("j/k", "move"),
+                ("/", "search"),
+                ("n/N", "prev/next match"),
+                ("v", "select lines"),
+                ("y", "copy"),
+                ("q/Esc", "exit"),
+            ]
+        }
         (_, Focus::Terminal, Some(SessionState::Alive)) => &[
             ("Alt-←/→", "column"),
             ("Alt-1..9", "jump"),
             ("Alt-v", "split"),
             ("Alt-w", "close column"),
             ("Alt-f", "full screen"),
+            ("Alt-s", "history"),
             ("Alt-j/k", "session"),
             ("", "other keys go to ssh"),
         ],
@@ -607,6 +647,7 @@ fn draw_help(frame: &mut Frame) {
         ("Alt-w", "close the column (the session keeps running)"),
         ("Alt-f / Alt-z", "full screen for the active column (toggle)"),
         ("Alt-H / Alt-L", "move the column left / right"),
+        ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
         ("x", "close the session"),
         ("f", "full-screen ssh (back to sshh on exit)"),
         ("", ""),

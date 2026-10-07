@@ -154,8 +154,12 @@ Each embedded session is the system
 .B ssh
 running in a pseudo terminal, so password prompts, host key questions and
 full\-screen programs work as in a normal terminal.
-Sessions follow the size of their column, keep 5000 lines of scrollback
-(mouse wheel) and accept pastes.
+.B sshh
+answers the queries programs send to their terminal (device attributes,
+cursor position, modes), and programs that ask for the mouse receive the
+clicks, drags and wheel events over their column.
+Sessions follow the size of their column, keep 5000 lines of history
+(mouse wheel, or history mode) and accept pastes.
 Quitting
 .B sshh
 closes them, after asking.
@@ -195,6 +199,26 @@ Toggle full screen for the active column, inside
 .TP
 .BR Alt\-H ", " Alt\-L
 (Alt\-Shift\-h, Alt\-Shift\-l) Move the active column left or right.
+.TP
+.B Alt\-s
+History mode for the active column: move with
+.BR j / k ,
+.BR Ctrl\-d / Ctrl\-u ,
+.BR gg / G ;
+search backwards with
+.BI / text
+and
+.BR n / N ;
+select lines with
+.BR v ;
+copy the selection (or the current line) with
+.B y
+or
+.BR Enter ;
+leave with
+.B q
+or
+.BR Esc .
 .PP
 While a column has focus, every other key goes to its ssh session,
 including
@@ -321,6 +345,7 @@ Click selects a connection; a double click opens it.
 Clicking a column focuses it.
 The wheel moves through the list, scrolls the details or scrolls back the
 history of the column under the pointer.
+Programs that ask for the mouse receive the events over their column.
 Hold
 .B Shift
 to select text with the terminal's native selection.

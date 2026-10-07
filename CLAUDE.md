@@ -34,7 +34,11 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `app.rs` = state + events (testable without a terminal); side effects (DB, clipboard, $EDITOR,
   sessions) are requested through `App::request` and run by `mod.rs`, which owns the sessions and
   publishes their state in `App::sessions`. `session.rs` = ssh in a PTY (portable-pty) + vt100
-  parser, rendered with tui-term; `key_bytes` encodes keys as xterm does. The loop polls crossterm
+  parser, rendered with tui-term; `key_bytes` encodes keys as xterm does. `Responder` (vt100
+  callbacks) answers terminal queries (DA1/DA2, DSR/CPR, XTVERSION, DECRQM, 18t) from the reader
+  thread. `mouse_bytes` encodes mouse events for programs in mouse mode (`App::mouse_sessions`).
+  History mode (`CopyMode`, `Alt-s`): snapshot of history+screen, line cursor/selection, search;
+  keys routed via `Request::HistoryKey` while the id is in `App::history_sessions`. The loop polls crossterm
   with a short timeout and redraws when a session reader thread sets `dirty`.
   `form.rs` = add/edit/wizard form. `ui.rs` = rendering. `term.rs` = terminal, $EDITOR, external
   programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and

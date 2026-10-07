@@ -3,7 +3,7 @@
 //! Side-effecting operations (database, clipboard, $EDITOR, ssh sessions)
 //! don't happen here: they are left in `request` and run by the main loop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
@@ -55,6 +55,12 @@ pub enum Request {
     Paste(i64, String),
     /// Scroll a session's history (positive = back).
     Scroll(i64, isize),
+    /// Mouse event for a session's program, relative to its screen.
+    Mouse(i64, MouseEvent),
+    /// Enter history mode (move, search and copy lines) in a session.
+    StartHistory(i64),
+    /// Key for a session in history mode.
+    HistoryKey(i64, KeyEvent),
     External { program: External, host: Box<Host> },
 }
 
@@ -181,6 +187,11 @@ pub struct App {
     pub history_for: Option<i64>,
     /// Embedded sessions by connection id (kept in sync by the main loop).
     pub sessions: HashMap<i64, SessionState>,
+    /// Sessions whose program asked for mouse events (kept in sync by the
+    /// main loop).
+    pub mouse_sessions: HashSet<i64>,
+    /// Sessions in history mode (kept in sync by the main loop).
+    pub history_sessions: HashSet<i64>,
     /// Connections shown as terminal columns, left to right.
     pub columns: Vec<i64>,
     pub active_column: usize,
@@ -220,6 +231,8 @@ impl App {
             history: Vec::new(),
             history_for: None,
             sessions: HashMap::new(),
+            mouse_sessions: HashSet::new(),
+            history_sessions: HashSet::new(),
             columns: Vec::new(),
             active_column: 0,
             zoomed: false,
@@ -635,6 +648,15 @@ impl App {
             KeyCode::Char('j') => self.switch_session(true),
             KeyCode::Char('k') => self.switch_session(false),
             KeyCode::Char('v') => self.open_in_column(true),
+            // History mode for the active column's session.
+            KeyCode::Char('s') => {
+                if let Some(id) = self.active_host_id().filter(|id| self.sessions.contains_key(id)) {
+                    self.focus_column(self.active_column);
+                    if !self.history_sessions.contains(&id) {
+                        self.request = Some(Request::StartHistory(id));
+                    }
+                }
+            }
             KeyCode::Char('w') => {
                 let index = if in_terminal {
                     Some(self.active_column)
@@ -677,6 +699,10 @@ impl App {
             self.focus = Focus::List;
             return;
         };
+        if self.history_sessions.contains(&id) {
+            self.request = Some(Request::HistoryKey(id, key));
+            return;
+        }
         match (self.sessions.get(&id), key.code) {
             (Some(SessionState::Alive), _) => self.request = Some(Request::Input(id, key)),
             (_, KeyCode::Enter | KeyCode::Char(' ')) => {
@@ -945,6 +971,25 @@ impl App {
         let column = self.column_areas.iter().find(|(_, area)| area.contains(pos)).map(|(i, _)| *i);
         let column_host = column.and_then(|i| self.columns.get(i).copied());
         let in_terminal = column_host.is_some();
+
+        // A program that asked for the mouse (htop, vim…) gets the events over
+        // its column, except with Shift (native text selection).
+        if matches!(self.mode, Mode::Normal)
+            && !mouse.modifiers.contains(KeyModifiers::SHIFT)
+            && let (Some(index), Some(id)) = (column, column_host)
+            && self.mouse_sessions.contains(&id)
+            && self.sessions.get(&id) == Some(&SessionState::Alive)
+        {
+            if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                self.focus_column(index);
+            }
+            let area = self.column_areas.iter().find(|(i, _)| *i == index).map(|(_, a)| *a);
+            if let Some(area) = area {
+                let relative = MouseEvent { column: pos.x - area.x, row: pos.y - area.y, ..mouse };
+                self.request = Some(Request::Mouse(id, relative));
+            }
+            return;
+        }
         match (&mut self.mode, mouse.kind) {
             (Mode::Form(form), MouseEventKind::Down(MouseButton::Left)) => form.on_click(pos),
             (Mode::Form(_) | Mode::ConfirmDelete { .. } | Mode::ConfirmClose { .. }, _) => {}
@@ -1159,6 +1204,49 @@ mod tests {
         app.on_key(ch(' '));
         assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.data.alias == "db1"));
         assert_eq!(app.focus, Focus::Terminal);
+    }
+
+    #[test]
+    fn alt_s_enters_history_mode_and_routes_keys_to_it() {
+        let mut app = app_with_sessions();
+        app.on_key(alt('s'));
+        assert_eq!(app.request, None, "no column open");
+        app.on_key(ch(' '));
+        app.on_key(alt('h'));
+        app.on_key(alt('s'));
+        assert_eq!((app.focus, app.request.take()), (Focus::Terminal, Some(Request::StartHistory(2))));
+        // The loop reports the session is in history mode: keys go there.
+        app.history_sessions.insert(2);
+        app.on_key(ch('k'));
+        assert_eq!(app.request.take(), Some(Request::HistoryKey(2, ch('k'))));
+        app.on_key(alt('s'));
+        assert_eq!(app.request, None);
+        app.history_sessions.clear();
+        app.on_key(ch('k'));
+        assert_eq!(app.request.take(), Some(Request::Input(2, ch('k'))));
+    }
+
+    #[test]
+    fn mouse_goes_to_programs_that_want_it() {
+        let mut app = app_with_two_columns();
+        app.column_areas = vec![(0, Rect::new(30, 1, 40, 20)), (1, Rect::new(72, 1, 40, 20))];
+        let at = |kind, column, modifiers| MouseEvent { kind, column, row: 5, modifiers };
+        let none = KeyModifiers::NONE;
+        // db1 (column 1) runs a program that wants the mouse; dev's session ended.
+        app.mouse_sessions.insert(2);
+        app.on_mouse(at(MouseEventKind::Down(MouseButton::Left), 35, none));
+        assert_eq!(app.active_column, 0);
+        // Relative to the column: (35, 5) in a column starting at (30, 1).
+        let expected = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: 4, modifiers: none };
+        assert_eq!(app.request.take(), Some(Request::Mouse(2, expected)));
+        app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
+        assert!(matches!(app.request.take(), Some(Request::Mouse(2, _))));
+        // With Shift, or without mouse mode, sshh handles it as before.
+        app.on_mouse(at(MouseEventKind::ScrollUp, 35, KeyModifiers::SHIFT));
+        assert_eq!(app.request.take(), Some(Request::Scroll(2, 3)));
+        app.mouse_sessions.clear();
+        app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
+        assert_eq!(app.request.take(), Some(Request::Scroll(2, 3)));
     }
 
     #[test]
