@@ -368,7 +368,8 @@ impl Form {
             frame.render_widget(Span::styled(format!("{marker}{label}"), label_style), label_area);
 
             let field = &self.fields[i];
-            let bg = if focused { Style::new().bg(Color::Indexed(236)) } else { Style::new() };
+            // DarkGray is ANSI color8 ("dim / inactive" in base16 themes).
+            let bg = if focused { Style::new().bg(Color::DarkGray) } else { Style::new() };
             if field.value.is_empty() {
                 frame.render_widget(Paragraph::new(hint.dim()).style(bg), input);
             } else {

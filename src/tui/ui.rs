@@ -19,7 +19,10 @@ use crate::connect::shell_quote;
 use crate::db;
 use crate::model::{Host, HostData};
 
-pub const ACCENT: Color = Color::Cyan;
+// Only the 16 ANSI colors (plus the terminal's default foreground and
+// background), so the UI follows the terminal theme (e.g. Omarchy themes,
+// where color4 / blue is the primary accent).
+pub const ACCENT: Color = Color::Blue;
 const MATCH: Color = Color::Yellow;
 const TAG: Color = Color::Magenta;
 const CONNECTED: Color = Color::Green;
@@ -402,13 +405,21 @@ const WORDMARK: [&str; 6] = [
 ];
 const TAGLINE: &str = "ssh connection manager";
 
-/// The logo: the wordmark in a cyan → magenta gradient and the tagline.
+/// The logo: the wordmark in a cyan → blue → magenta gradient (taken from the
+/// terminal theme) and the tagline.
 fn logo_lines() -> Vec<Line<'static>> {
-    let gradient = [51, 45, 39, 69, 135, 171];
+    let gradient = [
+        Color::LightCyan,
+        Color::Cyan,
+        Color::LightBlue,
+        Color::Blue,
+        Color::LightMagenta,
+        Color::Magenta,
+    ];
     let mut lines: Vec<Line> = WORDMARK
         .iter()
         .zip(gradient)
-        .map(|(row, color)| Line::from(row.fg(Color::Indexed(color))))
+        .map(|(row, color)| Line::from(row.fg(color)))
         .collect();
     let width = WORDMARK[0].chars().count();
     let pad = (width - TAGLINE.len()) / 2;

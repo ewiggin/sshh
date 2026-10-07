@@ -14,6 +14,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   exists; `include::refresh` after every DB change). **`~/.ssh/config` is never modified**: the user
   adds `Include config.d/sshh.conf` at the top by hand (after a `Host` it would be conditional to
   that block).
+- Colors: only the 16 ANSI colors + default fg/bg + modifiers (no `Color::Indexed`/`Rgb`), so the UI
+  follows the terminal theme (Omarchy themes set the palette; color4/blue = accent).
 - Option values: use `model::config_value` (only quotes single-value options; multi-argument ones
   like `LocalForward 8080 host:80` must not be quoted).
 

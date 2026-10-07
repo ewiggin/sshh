@@ -205,6 +205,10 @@ a normal terminal (passwords, host key prompts, agent, full-screen programs like
 `htop`). Sessions are resized with the pane, keep 5000 lines of scrollback (mouse wheel) and accept
 pastes. Quitting `sshh` closes them (it asks first).
 
+The UI only uses your terminal's 16-color palette and its default foreground and background, so it
+follows your terminal theme (for example, Omarchy themes): borders and shortcuts use the theme's
+blue, its primary accent.
+
 The list can be sorted by recent use, by number of uses or by alias. If the output isn't a terminal
 (`sshh | less`), it prints the list as text.
 
