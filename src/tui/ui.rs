@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap};
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use super::app::{App, Focus, ListTab, Mode, SessionState};
+use super::app::{App, Focus, ListTab, Mode, SessionKey, SessionKind, SessionState};
 use super::session::Session;
 use crate::cli::{format_date, relative_time};
 use crate::connect::shell_quote;
@@ -27,7 +27,7 @@ const MATCH: Color = Color::Yellow;
 const TAG: Color = Color::Magenta;
 const CONNECTED: Color = Color::Green;
 
-pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Session>) {
+pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Session>) {
     let [main, footer] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
     app.column_areas.clear();
@@ -182,7 +182,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let rows = app.entries.iter().map(|e| {
+    // Computed first, so the rows below only borrow fields of `app`, not `app`.
+    let states: Vec<Option<SessionState>> =
+        app.entries.iter().map(|e| app.host_session(app.hosts[e.index].id)).collect();
+    let rows = app.entries.iter().zip(states).map(|(e, state)| {
         let host = &app.hosts[e.index];
         let d = &host.data;
         let mut spans = highlighted(&d.alias, &e.alias_hl);
@@ -194,7 +197,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
             spans.push(Span::raw("  "));
             spans.push(tags_text(d).fg(TAG).dim());
         }
-        Row::new([Cell::from(session_dot(app.sessions.get(&host.id).copied())), Cell::from(Line::from(spans))])
+        Row::new([Cell::from(session_dot(state)), Cell::from(Line::from(spans))])
     });
     let table = Table::new(rows, [Constraint::Length(1), Constraint::Fill(1)])
         .block(block)
@@ -304,7 +307,7 @@ fn draw_tag_preview(frame: &mut Frame, app: &mut App, area: Rect) {
         .filter(|h| h.data.tags.contains(&tag.name))
         .map(|h| {
             Line::from(vec![
-                session_dot(app.sessions.get(&h.id).copied()),
+                session_dot(app.host_session(h.id)),
                 " ".into(),
                 h.data.alias.clone().bold(),
                 "  ".into(),
@@ -322,10 +325,10 @@ fn draw_tag_preview(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// Right side: the terminal columns, or an overview of the selected
 /// connection when no column is open.
-fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Session>, area: Rect) {
+fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Session>, area: Rect) {
     app.columns_area = area;
     if app.columns.is_empty() {
-        draw_overview(frame, app, sessions, area);
+        draw_overview(frame, app, area);
         return;
     }
     let areas = Layout::horizontal(vec![Constraint::Fill(1); app.columns.len()]).split(area);
@@ -336,13 +339,13 @@ fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<i64, Sessio
 
 /// Right side when no column is open: the logo and the selected connection's
 /// actions and latest connections.
-fn draw_overview(frame: &mut Frame, app: &App, sessions: &HashMap<i64, Session>, area: Rect) {
+fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     let host = app.selected_host();
     let title = match host {
         None => "sshh".to_string(),
-        Some(host) => match sessions.get(&host.id).map(|s| s.exit().is_none()) {
-            Some(true) => format!("{} — session running · Space shows it", host.data.alias),
-            Some(false) => format!("{} — session ended · Space reconnects", host.data.alias),
+        Some(host) => match app.host_session(host.id) {
+            Some(SessionState::Alive) => format!("{} — session running · Space shows it", host.data.alias),
+            Some(SessionState::Ended) => format!("{} — session ended · Space reconnects", host.data.alias),
             None => format!("{} — not connected", host.data.alias),
         },
     };
@@ -446,18 +449,23 @@ fn center_block(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
 fn draw_column(
     frame: &mut Frame,
     app: &mut App,
-    sessions: &HashMap<i64, Session>,
+    sessions: &HashMap<SessionKey, Session>,
     index: usize,
     area: Rect,
 ) {
     app.column_areas.push((index, Block::bordered().inner(area)));
     let focused = pane_focused(app, Focus::Terminal) && index == app.active_column;
-    let id = app.columns[index];
-    let Some(host) = app.host(id) else { return };
+    let key = app.columns[index];
+    let Some(host) = app.host(key.host) else { return };
     let number = index + 1;
+    // ssh columns show the target; sftp ones say so.
+    let what = match key.kind {
+        SessionKind::Ssh => host.data.target(),
+        SessionKind::Sftp => "sftp".to_string(),
+    };
 
-    let Some(session) = sessions.get(&id) else {
-        let title = format!("{number} {} — no session · Enter connects", host.data.alias);
+    let Some(session) = sessions.get(&key) else {
+        let title = format!("{number} {} — {what} · no session · Enter connects", host.data.alias);
         let text = vec![Line::default(), Line::from(vec!["  ".into(), host.data.target().bold()])];
         frame.render_widget(Paragraph::new(text).block(block(&title, focused)), area);
         return;
@@ -476,8 +484,8 @@ fn draw_column(
             }
             title
         }
-        (None, None) => format!("{number} ● {} — {}", host.data.alias, host.data.target()),
-        (None, Some(exit)) => format!("{number} {} — {exit} · Enter reconnects", host.data.alias),
+        (None, None) => format!("{number} ● {} — {what}", host.data.alias),
+        (None, Some(exit)) => format!("{number} {} — {what} · {exit} · Enter reconnects", host.data.alias),
     };
     if copy.is_none() && screen.scrollback() > 0 {
         title.push_str(&format!(" · scrolled back {}", screen.scrollback()));
@@ -525,7 +533,7 @@ fn overview_lines(host: &Host) -> Vec<Line<'static>> {
         key("Space", "open a session here"),
         key("Alt-v", "open it in a new column"),
         key("f", "full-screen ssh"),
-        key("s", "sftp"),
+        key("s", "sftp in a new column"),
         key("c", "install your public key (ssh-copy-id)"),
         key("Enter", "edit (also e)"),
     ]
@@ -553,11 +561,11 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(Line::from(format!(" {}", status.text)).fg(color), area);
         return;
     }
-    let active = app.active_host_id().and_then(|id| app.sessions.get(&id).copied());
+    let active = app.active_key().and_then(|key| app.sessions.get(&key).copied());
     let keys: &[(&str, &str)] = match (&app.mode, app.focus, active) {
         (Mode::Search, ..) => &[("", "type to filter"), ("↑↓ Ctrl-j/k", "move"), ("Enter/Esc", "back to list")],
         (_, Focus::Terminal, Some(_))
-            if app.active_host_id().is_some_and(|id| app.history_sessions.contains(&id)) =>
+            if app.active_key().is_some_and(|key| app.history_sessions.contains(&key)) =>
         {
             &[
                 ("j/k", "move"),
@@ -648,7 +656,7 @@ fn draw_help(frame: &mut Frame) {
         ("Alt-f / Alt-z", "full screen for the active column (toggle)"),
         ("Alt-H / Alt-L", "move the column left / right"),
         ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
-        ("x", "close the session"),
+        ("x", "close the connection's sessions (ssh and sftp)"),
         ("f", "full-screen ssh (back to sshh on exit)"),
         ("", ""),
         ("j/k ↑/↓", "move"),
@@ -664,7 +672,8 @@ fn draw_help(frame: &mut Frame) {
         ("Enter / e, t", "edit / edit tags"),
         ("dd", "delete (asks for confirmation)"),
         ("yy", "copy the ssh command"),
-        ("s / c", "sftp / install your public key (ssh-copy-id)"),
+        ("s", "sftp in a new column, next to the ssh one"),
+        ("c", "install your public key (ssh-copy-id)"),
         ("o", "change sort (recent / most used / alphabetical)"),
         ("R", "reload"),
         ("q / Ctrl-c", "quit"),

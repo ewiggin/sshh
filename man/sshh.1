@@ -311,7 +311,8 @@ Copy the equivalent
 command to the clipboard.
 .TP
 .B x
-Close the selected connection's session (asks if it is alive).
+Close the selected connection's sessions, ssh and sftp (asks if one is
+alive).
 .TP
 .B f
 Run a full\-screen
@@ -319,11 +320,17 @@ Run a full\-screen
 .B sshh
 comes back when it exits.
 .TP
-.BR s ", " c
+.B s
 Open
-.BR sftp (1),
-or install your public key with
-.BR ssh\-copy\-id (1).
+.BR sftp (1)
+in a new column, next to the connection's ssh session.
+.TP
+.B c
+Install your public key with
+.BR ssh\-copy\-id (1)
+(full screen;
+.B sshh
+comes back when it exits).
 .TP
 .B o
 Change the sort order: recent, most used, alphabetical.

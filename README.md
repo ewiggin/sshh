@@ -204,8 +204,8 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
   (switch with `[` / `]` or a click on the tab): the Tags tab lists every tag with its number of
   connections, the details pane previews the connections of the highlighted tag, and `Space` goes back
   to the connections filtered by that tag (`#tag` in the search box; `Esc` clears it).
-- **Right**: **terminal columns**, each showing the embedded ssh session of one connection, side by
-  side. Connections with a live session are marked with a green `●` in the list (a grey `○` means
+- **Right**: **terminal columns**, each showing an embedded session side by side: the ssh session of
+  a connection or, with `s`, its sftp session (a connection can have both open at once). Connections with a live session are marked with a green `●` in the list (a grey `○` means
   the session ended). Closing a column doesn't close its session. With no column open, the right side
   shows the actions and latest connections of the selected connection.
 
@@ -254,7 +254,7 @@ List and general keys:
 
 | Key | Action |
 |---|---|
-| `x` | close the selected connection's session (asks first) |
+| `x` | close the selected connection's sessions, ssh and sftp (asks first) |
 | `f` | full-screen ssh, as a plain terminal; you come back to `sshh` when it exits |
 | `j` / `k`, `↓` / `↑` | move |
 | `gg` / `G` | go to top / bottom |
@@ -268,7 +268,7 @@ List and general keys:
 | `t` | edit tags |
 | `dd` | delete (asks for confirmation with `y`) |
 | `yy` | copy the equivalent `ssh` command to the clipboard |
-| `s` | open `sftp` with the connection (full screen, back to `sshh` on exit) |
+| `s` | open `sftp` with the connection in a new column, next to its ssh session |
 | `c` | install your public key on the server (`ssh-copy-id`) |
 | `o` | change sort order: recent → most used → alphabetical |
 | `R` | reload the list |

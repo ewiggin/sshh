@@ -22,12 +22,12 @@ use ratatui::text::Line;
 use crate::db::Db;
 use crate::model::{Host, HostData};
 use crate::{connect, include};
-use app::{App, External, Focus, Mode, Outcome, Request, SessionState};
+use app::{App, External, Focus, Mode, Outcome, Request, SessionKey, SessionKind, SessionState};
 use form::{Form, FormEvent, FormKind};
 use session::{CopyAction, Session};
 
-/// Embedded sessions by connection id.
-type Sessions = HashMap<i64, Session>;
+/// Embedded sessions (ssh and sftp) by connection and kind.
+type Sessions = HashMap<SessionKey, Session>;
 
 pub fn run() -> Result<()> {
     let mut db = Db::open_default()?;
@@ -82,11 +82,12 @@ fn event_loop(
 
 /// Detects finished sessions and publishes the session states to the app.
 fn sync_sessions(sessions: &mut Sessions, app: &mut App) {
-    for (id, session) in sessions.iter_mut() {
+    for (key, session) in sessions.iter_mut() {
         if session.poll_exit()
-            && let Some(host) = app.hosts.iter().find(|h| h.id == *id)
+            && let Some(host) = app.hosts.iter().find(|h| h.id == key.host)
         {
-            app.info(format!("Session '{}': {}", host.data.alias, session.exit().unwrap_or_default()));
+            let (alias, kind) = (&host.data.alias, key.kind.label());
+            app.info(format!("Session '{alias}' ({kind}): {}", session.exit().unwrap_or_default()));
         }
     }
     app.mouse_sessions =
@@ -106,7 +107,7 @@ fn sync_sessions(sessions: &mut Sessions, app: &mut App) {
 fn resize_columns(sessions: &mut Sessions, app: &App) -> bool {
     let mut changed = false;
     for (index, area) in &app.column_areas {
-        let Some(session) = app.columns.get(*index).and_then(|id| sessions.get_mut(id)) else {
+        let Some(session) = app.columns.get(*index).and_then(|key| sessions.get_mut(key)) else {
             continue;
         };
         let before = session.parser().screen().size();
@@ -143,22 +144,28 @@ fn open_session(
     sessions: &mut Sessions,
     dirty: &Arc<AtomicBool>,
     host: &Host,
+    kind: SessionKind,
 ) -> Result<()> {
     // Approximate size; the first draw fits it to its column.
     let area = app.columns_area;
     let columns = app.columns.len().max(1) as u16;
     let (rows, cols) = (area.height.saturating_sub(2), (area.width / columns).saturating_sub(2));
-    let spawned = connect::session_command(db, host)
-        .and_then(|(ssh, args)| Session::spawn(&ssh, &args, rows.max(10), cols.max(20), Arc::clone(dirty)));
+    let command = match kind {
+        SessionKind::Ssh => connect::session_command(db, host),
+        SessionKind::Sftp => Ok(("sftp".into(), connect::tool_args(host))),
+    };
+    let spawned = command
+        .and_then(|(bin, args)| Session::spawn(&bin, &args, rows.max(10), cols.max(20), Arc::clone(dirty)));
+    let key = SessionKey { host: host.id, kind };
     match spawned {
         Ok(session) => {
-            // Replaces a finished session of the same connection, if any.
-            sessions.insert(host.id, session);
+            // Replaces a finished session of the same kind, if any.
+            sessions.insert(key, session);
             reload_hosts(db, app)?;
         }
         Err(e) => {
-            if !sessions.contains_key(&host.id) {
-                app.remove_column_of(host.id);
+            if !sessions.contains_key(&key) {
+                app.remove_column_of(key);
             }
             app.focus = Focus::List;
             app.error(format!("Could not open a session: {e:#}"));
@@ -167,7 +174,7 @@ fn open_session(
     Ok(())
 }
 
-/// Runs sftp, ssh-copy-id or a full-screen ssh, then comes back to the TUI.
+/// Runs ssh-copy-id or a full-screen ssh, then comes back to the TUI.
 fn run_external(
     terminal: &mut DefaultTerminal,
     db: &Db,
@@ -183,7 +190,6 @@ fn run_external(
                 return Ok(());
             }
         },
-        External::Sftp => ("sftp".into(), connect::tool_args(host)),
         External::SshCopyId => {
             let mut args = Vec::new();
             if let Some(identity) = &host.data.identity_file {
@@ -233,7 +239,7 @@ fn handle_request(
             match db.delete_by_alias(&alias) {
                 Ok(_) => {
                     if let Some(id) = id {
-                        sessions.remove(&id);
+                        sessions.retain(|key, _| key.host != id);
                     }
                     app.set_hosts(db.list_hosts()?, None);
                     app.info(format!("Connection '{alias}' deleted"));
@@ -258,10 +264,14 @@ fn handle_request(
             reload_hosts(db, app)?;
             app.info("List reloaded");
         }
-        Request::OpenSession(host) => open_session(db, app, sessions, dirty, &host)?,
-        Request::CloseSession(id) => {
-            if sessions.remove(&id).is_some() {
-                app.info("Session closed");
+        Request::OpenSession(host, kind) => open_session(db, app, sessions, dirty, &host, kind)?,
+        Request::CloseSessions(id) => {
+            let before = sessions.len();
+            sessions.retain(|key, _| key.host != id);
+            match before - sessions.len() {
+                0 => {}
+                1 => app.info("Session closed"),
+                n => app.info(format!("{n} sessions closed")),
             }
         }
         Request::Input(id, key) => {

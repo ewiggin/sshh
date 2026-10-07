@@ -34,8 +34,41 @@ pub enum Outcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum External {
     Ssh,
-    Sftp,
     SshCopyId,
+}
+
+/// What runs in an embedded session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SessionKind {
+    Ssh,
+    Sftp,
+}
+
+impl SessionKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ssh => "ssh",
+            Self::Sftp => "sftp",
+        }
+    }
+}
+
+/// An embedded session: a connection and what runs in it. A connection can
+/// have an ssh and an sftp session at the same time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SessionKey {
+    pub host: i64,
+    pub kind: SessionKind,
+}
+
+impl SessionKey {
+    pub fn ssh(host: i64) -> Self {
+        Self { host, kind: SessionKind::Ssh }
+    }
+
+    pub fn sftp(host: i64) -> Self {
+        Self { host, kind: SessionKind::Sftp }
+    }
 }
 
 /// Operation the main loop must run.
@@ -47,20 +80,21 @@ pub enum Request {
     /// Edit the focused form field with $EDITOR.
     Editor,
     Reload,
-    /// Open (or reopen, if it ended) the embedded session of a connection.
-    OpenSession(Box<Host>),
-    CloseSession(i64),
-    /// Input for the embedded session of a connection.
-    Input(i64, KeyEvent),
-    Paste(i64, String),
+    /// Open (or reopen, if it ended) an embedded session of a connection.
+    OpenSession(Box<Host>, SessionKind),
+    /// Close every session of a connection.
+    CloseSessions(i64),
+    /// Input for an embedded session.
+    Input(SessionKey, KeyEvent),
+    Paste(SessionKey, String),
     /// Scroll a session's history (positive = back).
-    Scroll(i64, isize),
+    Scroll(SessionKey, isize),
     /// Mouse event for a session's program, relative to its screen.
-    Mouse(i64, MouseEvent),
+    Mouse(SessionKey, MouseEvent),
     /// Enter history mode (move, search and copy lines) in a session.
-    StartHistory(i64),
+    StartHistory(SessionKey),
     /// Key for a session in history mode.
-    HistoryKey(i64, KeyEvent),
+    HistoryKey(SessionKey, KeyEvent),
     External { program: External, host: Box<Host> },
 }
 
@@ -186,14 +220,14 @@ pub struct App {
     pub history: Vec<HistoryEntry>,
     pub history_for: Option<i64>,
     /// Embedded sessions by connection id (kept in sync by the main loop).
-    pub sessions: HashMap<i64, SessionState>,
+    pub sessions: HashMap<SessionKey, SessionState>,
     /// Sessions whose program asked for mouse events (kept in sync by the
     /// main loop).
-    pub mouse_sessions: HashSet<i64>,
+    pub mouse_sessions: HashSet<SessionKey>,
     /// Sessions in history mode (kept in sync by the main loop).
-    pub history_sessions: HashSet<i64>,
-    /// Connections shown as terminal columns, left to right.
-    pub columns: Vec<i64>,
+    pub history_sessions: HashSet<SessionKey>,
+    /// Sessions shown as terminal columns, left to right.
+    pub columns: Vec<SessionKey>,
     pub active_column: usize,
     /// The active column takes the whole screen.
     pub zoomed: bool,
@@ -256,36 +290,54 @@ impl App {
 
     /// Session state of the selected connection, if it has one.
     pub fn selected_session(&self) -> Option<SessionState> {
-        self.sessions.get(&self.selected_host()?.id).copied()
+        self.host_session(self.selected_host()?.id)
+    }
+
+    /// Session state of a connection: alive if any of its sessions is.
+    pub fn host_session(&self, host: i64) -> Option<SessionState> {
+        let mut states = self.sessions.iter().filter(|(k, _)| k.host == host).map(|(_, s)| *s);
+        let first = states.next()?;
+        Some(if first == SessionState::Alive || states.any(|s| s == SessionState::Alive) {
+            SessionState::Alive
+        } else {
+            SessionState::Ended
+        })
     }
 
     pub fn host(&self, id: i64) -> Option<&Host> {
         self.hosts.iter().find(|h| h.id == id)
     }
 
-    /// Connection shown in the active column.
-    pub fn active_host_id(&self) -> Option<i64> {
+    /// Session shown in the active column.
+    pub fn active_key(&self) -> Option<SessionKey> {
         self.columns.get(self.active_column).copied()
     }
 
-    fn column_of(&self, id: i64) -> Option<usize> {
-        self.columns.iter().position(|c| *c == id)
+    fn column_of(&self, key: SessionKey) -> Option<usize> {
+        self.columns.iter().position(|c| *c == key)
     }
 
     /// Focuses terminal column `index` and selects its connection in the list.
     fn focus_column(&mut self, index: usize) {
-        let Some(&id) = self.columns.get(index) else { return };
+        let Some(&key) = self.columns.get(index) else { return };
         self.active_column = index;
         self.mode = Mode::Normal;
         self.focus = Focus::Terminal;
-        if let Some(row) = self.entries.iter().position(|e| self.hosts[e.index].id == id) {
+        if let Some(row) = self.entries.iter().position(|e| self.hosts[e.index].id == key.host) {
             self.select(row);
         }
     }
 
-    /// Removes the column showing connection `id`, if any.
-    pub fn remove_column_of(&mut self, id: i64) {
-        if let Some(index) = self.column_of(id) {
+    /// Removes the column showing session `key`, if any.
+    pub fn remove_column_of(&mut self, key: SessionKey) {
+        if let Some(index) = self.column_of(key) {
+            self.remove_column(index);
+        }
+    }
+
+    /// Removes every column of connection `host`.
+    pub fn remove_columns_of_host(&mut self, host: i64) {
+        while let Some(index) = self.columns.iter().position(|k| k.host == host) {
             self.remove_column(index);
         }
     }
@@ -332,9 +384,9 @@ impl App {
         self.select(by_id.unwrap_or(previous));
         // Drop columns of connections that no longer exist.
         let gone: Vec<i64> =
-            self.columns.iter().copied().filter(|id| self.host(*id).is_none()).collect();
+            self.columns.iter().map(|k| k.host).filter(|id| self.host(*id).is_none()).collect();
         for id in gone {
-            self.remove_column_of(id);
+            self.remove_columns_of_host(id);
         }
     }
 
@@ -546,18 +598,20 @@ impl App {
 
     /// Space: shows the selected connection in the active column.
     fn connect_selected(&mut self) {
-        self.open_in_column(false);
+        self.open_in_column(SessionKind::Ssh, false);
     }
 
-    /// Shows the selected connection in the active column or, with
-    /// `new_column`, in a new column right of it. Opens its session if needed.
-    /// A connection already shown in a column just gets focused.
-    fn open_in_column(&mut self, new_column: bool) {
+    /// Shows a session of the selected connection in the active column or,
+    /// with `new_column`, in a new column right of it. Opens the session if
+    /// needed. A session already shown in a column just gets focused.
+    fn open_in_column(&mut self, kind: SessionKind, new_column: bool) {
         let Some(host) = self.selected_host().cloned() else { return };
-        let index = match self.column_of(host.id) {
+        let key = SessionKey { host: host.id, kind };
+        let index = match self.column_of(key) {
             Some(index) => {
                 if new_column {
-                    self.info(format!("'{}' is already open in column {}", host.data.alias, index + 1));
+                    let (alias, kind) = (&host.data.alias, kind.label());
+                    self.info(format!("'{alias}' ({kind}) is already open in column {}", index + 1));
                 }
                 index
             }
@@ -569,17 +623,17 @@ impl App {
                     return;
                 }
                 let index = if self.columns.is_empty() { 0 } else { self.active_column + 1 };
-                self.columns.insert(index, host.id);
+                self.columns.insert(index, key);
                 self.zoomed = false;
                 index
             }
             None => {
-                self.columns[self.active_column] = host.id;
+                self.columns[self.active_column] = key;
                 self.active_column
             }
         };
-        if self.sessions.get(&host.id) != Some(&SessionState::Alive) {
-            self.request = Some(Request::OpenSession(Box::new(host)));
+        if self.sessions.get(&key) != Some(&SessionState::Alive) {
+            self.request = Some(Request::OpenSession(Box::new(host), kind));
         }
         self.focus_column(index);
     }
@@ -594,7 +648,7 @@ impl App {
     /// Moves the selection to the next (or previous) connection with a session.
     fn switch_session(&mut self, forward: bool) {
         let with_session: Vec<usize> = (0..self.entries.len())
-            .filter(|&i| self.sessions.contains_key(&self.hosts[self.entries[i].index].id))
+            .filter(|&i| self.host_session(self.hosts[self.entries[i].index].id).is_some())
             .collect();
         let current = self.table.selected().unwrap_or(0);
         let next = if forward {
@@ -610,14 +664,17 @@ impl App {
     /// Shows the next (or previous) session in the active column, skipping
     /// sessions already visible in other columns.
     fn cycle_column_session(&mut self, forward: bool) {
-        let Some(current) = self.active_host_id() else { return };
-        let candidates: Vec<i64> = self
+        let Some(current) = self.active_key() else { return };
+        let candidates: Vec<SessionKey> = self
             .entries
             .iter()
-            .map(|e| self.hosts[e.index].id)
-            .filter(|id| self.sessions.contains_key(id) && (*id == current || self.column_of(*id).is_none()))
+            .flat_map(|e| {
+                let id = self.hosts[e.index].id;
+                [SessionKey::ssh(id), SessionKey::sftp(id)]
+            })
+            .filter(|k| self.sessions.contains_key(k) && (*k == current || self.column_of(*k).is_none()))
             .collect();
-        let Some(pos) = candidates.iter().position(|id| *id == current) else { return };
+        let Some(pos) = candidates.iter().position(|k| *k == current) else { return };
         let next = if forward { pos + 1 } else { pos + candidates.len() - 1 };
         self.columns[self.active_column] = candidates[next % candidates.len()];
         self.focus_column(self.active_column);
@@ -647,13 +704,13 @@ impl App {
             KeyCode::Char('k') if in_terminal => self.cycle_column_session(false),
             KeyCode::Char('j') => self.switch_session(true),
             KeyCode::Char('k') => self.switch_session(false),
-            KeyCode::Char('v') => self.open_in_column(true),
+            KeyCode::Char('v') => self.open_in_column(SessionKind::Ssh, true),
             // History mode for the active column's session.
             KeyCode::Char('s') => {
-                if let Some(id) = self.active_host_id().filter(|id| self.sessions.contains_key(id)) {
+                if let Some(key) = self.active_key().filter(|k| self.sessions.contains_key(k)) {
                     self.focus_column(self.active_column);
-                    if !self.history_sessions.contains(&id) {
-                        self.request = Some(Request::StartHistory(id));
+                    if !self.history_sessions.contains(&key) {
+                        self.request = Some(Request::StartHistory(key));
                     }
                 }
             }
@@ -661,7 +718,8 @@ impl App {
                 let index = if in_terminal {
                     Some(self.active_column)
                 } else {
-                    self.selected_host().and_then(|h| self.column_of(h.id))
+                    let host = self.selected_host().map(|h| h.id);
+                    self.columns.iter().position(|k| Some(k.host) == host)
                 };
                 if let Some(index) = index {
                     self.remove_column(index);
@@ -695,19 +753,19 @@ impl App {
 
     /// Keys while a terminal column has focus: everything goes to ssh.
     fn on_terminal_key(&mut self, key: KeyEvent) {
-        let Some(id) = self.active_host_id() else {
+        let Some(session) = self.active_key() else {
             self.focus = Focus::List;
             return;
         };
-        if self.history_sessions.contains(&id) {
-            self.request = Some(Request::HistoryKey(id, key));
+        if self.history_sessions.contains(&session) {
+            self.request = Some(Request::HistoryKey(session, key));
             return;
         }
-        match (self.sessions.get(&id), key.code) {
-            (Some(SessionState::Alive), _) => self.request = Some(Request::Input(id, key)),
+        match (self.sessions.get(&session), key.code) {
+            (Some(SessionState::Alive), _) => self.request = Some(Request::Input(session, key)),
             (_, KeyCode::Enter | KeyCode::Char(' ')) => {
-                if let Some(host) = self.host(id) {
-                    self.request = Some(Request::OpenSession(Box::new(host.clone())));
+                if let Some(host) = self.host(session.host) {
+                    self.request = Some(Request::OpenSession(Box::new(host.clone()), session.kind));
                 }
             }
             (_, KeyCode::Esc) => self.focus = Focus::List,
@@ -718,10 +776,10 @@ impl App {
     pub fn on_paste(&mut self, text: &str) {
         match &mut self.mode {
             Mode::Normal if self.focus == Focus::Terminal => {
-                if let Some(id) = self.active_host_id()
-                    && self.sessions.get(&id) == Some(&SessionState::Alive)
+                if let Some(key) = self.active_key()
+                    && self.sessions.get(&key) == Some(&SessionState::Alive)
                 {
-                    self.request = Some(Request::Paste(id, text.to_string()));
+                    self.request = Some(Request::Paste(key, text.to_string()));
                 }
             }
             Mode::Search => {
@@ -781,8 +839,8 @@ impl App {
                 let id = *id;
                 self.mode = Mode::Normal;
                 if matches!(key.code, KeyCode::Char('y' | 'Y')) {
-                    self.request = Some(Request::CloseSession(id));
-                    self.remove_column_of(id);
+                    self.request = Some(Request::CloseSessions(id));
+                    self.remove_columns_of_host(id);
                     self.focus = Focus::List;
                 }
             }
@@ -842,7 +900,7 @@ impl App {
             KeyCode::Char('t') => self.edit_selected(form::TAGS),
             KeyCode::Char('R') => self.request = Some(Request::Reload),
             KeyCode::Char('f') if !ctrl => self.run_selected(External::Ssh),
-            KeyCode::Char('s') => self.run_selected(External::Sftp),
+            KeyCode::Char('s') => self.open_in_column(SessionKind::Sftp, true),
             KeyCode::Char('c') => self.run_selected(External::SshCopyId),
             KeyCode::Char('x') => self.close_selected(),
             KeyCode::Char('o') => {
@@ -898,15 +956,15 @@ impl App {
         }
     }
 
-    /// Closes the selected connection's session (asking first if it's alive).
+    /// Closes the selected connection's sessions (asking first if one is alive).
     fn close_selected(&mut self) {
         let Some(host) = self.selected_host() else { return };
         let (id, alias) = (host.id, host.data.alias.clone());
         match self.selected_session() {
             Some(SessionState::Alive) => self.mode = Mode::ConfirmClose { id, alias },
             Some(SessionState::Ended) => {
-                self.request = Some(Request::CloseSession(id));
-                self.remove_column_of(id);
+                self.request = Some(Request::CloseSessions(id));
+                self.remove_columns_of_host(id);
             }
             None => {}
         }
@@ -969,14 +1027,14 @@ impl App {
         let pos = Position::new(mouse.column, mouse.row);
         let in_detail = self.detail_area.contains(pos);
         let column = self.column_areas.iter().find(|(_, area)| area.contains(pos)).map(|(i, _)| *i);
-        let column_host = column.and_then(|i| self.columns.get(i).copied());
-        let in_terminal = column_host.is_some();
+        let column_key = column.and_then(|i| self.columns.get(i).copied());
+        let in_terminal = column_key.is_some();
 
         // A program that asked for the mouse (htop, vim…) gets the events over
         // its column, except with Shift (native text selection).
         if matches!(self.mode, Mode::Normal)
             && !mouse.modifiers.contains(KeyModifiers::SHIFT)
-            && let (Some(index), Some(id)) = (column, column_host)
+            && let (Some(index), Some(id)) = (column, column_key)
             && self.mouse_sessions.contains(&id)
             && self.sessions.get(&id) == Some(&SessionState::Alive)
         {
@@ -996,7 +1054,7 @@ impl App {
             (Mode::ConfirmQuit { .. }, _) => {}
             (Mode::Help, MouseEventKind::Down(_)) => self.mode = Mode::Normal,
             (Mode::Help, _) => {}
-            (_, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) if let Some(id) = column_host => {
+            (_, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) if let Some(id) = column_key => {
                 let delta = if mouse.kind == MouseEventKind::ScrollUp { 3 } else { -3 };
                 self.request = Some(Request::Scroll(id, delta));
             }
@@ -1202,8 +1260,66 @@ mod tests {
         assert_eq!(app.query, "#prod ");
         assert_eq!(app.request, None);
         app.on_key(ch(' '));
-        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.data.alias == "db1"));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Ssh)) if h.data.alias == "db1"));
         assert_eq!(app.focus, Focus::Terminal);
+    }
+
+    #[test]
+    fn s_opens_sftp_in_a_new_column_next_to_ssh() {
+        let mut app = app_with_sessions();
+        app.on_key(ch(' '));
+        app.on_key(alt('h'));
+        app.on_key(ch('s'));
+        assert_eq!(app.columns, [SessionKey::ssh(2), SessionKey::sftp(2)]);
+        assert_eq!((app.focus, app.active_column), (Focus::Terminal, 1));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Sftp)) if h.id == 2));
+
+        // Again: it's already open, so it's just focused.
+        app.sessions.insert(SessionKey::sftp(2), SessionState::Alive);
+        app.request = None;
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(ch('s'));
+        assert_eq!((app.columns.len(), app.active_column, &app.request), (2, 1, &None));
+        // Keys go to the sftp session of the active column.
+        app.on_key(ch('l'));
+        assert_eq!(app.request.take(), Some(Request::Input(SessionKey::sftp(2), ch('l'))));
+    }
+
+    #[test]
+    fn a_connection_is_alive_if_any_of_its_sessions_is() {
+        let mut app = app();
+        app.sessions.insert(SessionKey::ssh(1), SessionState::Ended);
+        assert_eq!(app.host_session(1), Some(SessionState::Ended));
+        app.sessions.insert(SessionKey::sftp(1), SessionState::Alive);
+        assert_eq!(app.host_session(1), Some(SessionState::Alive));
+        assert_eq!(app.host_session(2), None);
+    }
+
+    #[test]
+    fn x_closes_every_session_of_the_connection() {
+        let mut app = app_with_sessions();
+        app.on_key(ch(' '));
+        app.on_key(alt('h'));
+        app.on_key(ch('s'));
+        app.sessions.insert(SessionKey::sftp(2), SessionState::Alive);
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(ch('x'));
+        app.on_key(ch('y'));
+        assert_eq!(app.request, Some(Request::CloseSessions(2)));
+        assert!(app.columns.is_empty());
+    }
+
+    #[test]
+    fn alt_j_k_also_cycle_through_sftp_sessions() {
+        let mut app = app_with_sessions();
+        app.sessions.insert(SessionKey::sftp(2), SessionState::Alive);
+        app.on_key(ch(' '));
+        app.on_key(alt('j'));
+        assert_eq!(app.columns, [SessionKey::sftp(2)]);
+        app.on_key(alt('j'));
+        assert_eq!(app.columns, [SessionKey::ssh(3)]);
     }
 
     #[test]
@@ -1214,16 +1330,16 @@ mod tests {
         app.on_key(ch(' '));
         app.on_key(alt('h'));
         app.on_key(alt('s'));
-        assert_eq!((app.focus, app.request.take()), (Focus::Terminal, Some(Request::StartHistory(2))));
+        assert_eq!((app.focus, app.request.take()), (Focus::Terminal, Some(Request::StartHistory(SessionKey::ssh(2)))));
         // The loop reports the session is in history mode: keys go there.
-        app.history_sessions.insert(2);
+        app.history_sessions.insert(SessionKey::ssh(2));
         app.on_key(ch('k'));
-        assert_eq!(app.request.take(), Some(Request::HistoryKey(2, ch('k'))));
+        assert_eq!(app.request.take(), Some(Request::HistoryKey(SessionKey::ssh(2), ch('k'))));
         app.on_key(alt('s'));
         assert_eq!(app.request, None);
         app.history_sessions.clear();
         app.on_key(ch('k'));
-        assert_eq!(app.request.take(), Some(Request::Input(2, ch('k'))));
+        assert_eq!(app.request.take(), Some(Request::Input(SessionKey::ssh(2), ch('k'))));
     }
 
     #[test]
@@ -1233,20 +1349,20 @@ mod tests {
         let at = |kind, column, modifiers| MouseEvent { kind, column, row: 5, modifiers };
         let none = KeyModifiers::NONE;
         // db1 (column 1) runs a program that wants the mouse; dev's session ended.
-        app.mouse_sessions.insert(2);
+        app.mouse_sessions.insert(SessionKey::ssh(2));
         app.on_mouse(at(MouseEventKind::Down(MouseButton::Left), 35, none));
         assert_eq!(app.active_column, 0);
         // Relative to the column: (35, 5) in a column starting at (30, 1).
         let expected = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: 4, modifiers: none };
-        assert_eq!(app.request.take(), Some(Request::Mouse(2, expected)));
+        assert_eq!(app.request.take(), Some(Request::Mouse(SessionKey::ssh(2), expected)));
         app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
-        assert!(matches!(app.request.take(), Some(Request::Mouse(2, _))));
+        assert!(matches!(app.request.take(), Some(Request::Mouse(k, _)) if k == SessionKey::ssh(2)));
         // With Shift, or without mouse mode, sshh handles it as before.
         app.on_mouse(at(MouseEventKind::ScrollUp, 35, KeyModifiers::SHIFT));
-        assert_eq!(app.request.take(), Some(Request::Scroll(2, 3)));
+        assert_eq!(app.request.take(), Some(Request::Scroll(SessionKey::ssh(2), 3)));
         app.mouse_sessions.clear();
         app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
-        assert_eq!(app.request.take(), Some(Request::Scroll(2, 3)));
+        assert_eq!(app.request.take(), Some(Request::Scroll(SessionKey::ssh(2), 3)));
     }
 
     #[test]
@@ -1326,7 +1442,7 @@ mod tests {
 
     #[test]
     fn quick_actions() {
-        for (c, program) in [('s', External::Sftp), ('c', External::SshCopyId), ('f', External::Ssh)] {
+        for (c, program) in [('c', External::SshCopyId), ('f', External::Ssh)] {
             let mut app = app();
             app.on_key(ch(c));
             assert!(
@@ -1339,8 +1455,8 @@ mod tests {
     /// App with a live session on db1 (selected) and an ended one on dev.
     fn app_with_sessions() -> App {
         let mut app = app();
-        app.sessions.insert(2, SessionState::Alive);
-        app.sessions.insert(3, SessionState::Ended);
+        app.sessions.insert(SessionKey::ssh(2), SessionState::Alive);
+        app.sessions.insert(SessionKey::ssh(3), SessionState::Ended);
         app.on_key(ch('j'));
         app
     }
@@ -1350,7 +1466,7 @@ mod tests {
     }
 
     fn columns(app: &App) -> Vec<&str> {
-        app.columns.iter().map(|id| app.host(*id).unwrap().data.alias.as_str()).collect()
+        app.columns.iter().map(|k| app.host(k.host).unwrap().data.alias.as_str()).collect()
     }
 
     /// Columns [db1, dev] with the second one active.
@@ -1374,7 +1490,7 @@ mod tests {
         app.on_key(ch('k'));
         app.on_key(ch(' '));
         assert_eq!(columns(&app), ["web1"]);
-        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 1));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Ssh)) if h.id == 1));
     }
 
     #[test]
@@ -1409,11 +1525,11 @@ mod tests {
         app.on_key(ch(' '));
         for k in [ch('q'), ctrl('c'), key(KeyCode::Esc), ch('/'), key(KeyCode::Tab)] {
             app.on_key(k);
-            assert_eq!(app.request.take(), Some(Request::Input(2, k)));
+            assert_eq!(app.request.take(), Some(Request::Input(SessionKey::ssh(2), k)));
         }
         assert_eq!(app.outcome, None);
         app.on_paste("ls\n");
-        assert_eq!(app.request.take(), Some(Request::Paste(2, "ls\n".into())));
+        assert_eq!(app.request.take(), Some(Request::Paste(SessionKey::ssh(2), "ls\n".into())));
     }
 
     #[test]
@@ -1447,7 +1563,7 @@ mod tests {
         let mut app = app_with_two_columns();
         app.on_key(alt('w'));
         assert_eq!((columns(&app), app.active_column, app.focus), (vec!["db1"], 0, Focus::Terminal));
-        assert!(app.sessions.contains_key(&3));
+        assert!(app.sessions.contains_key(&SessionKey::ssh(3)));
         assert_eq!(app.request, None);
         app.on_key(alt('w'));
         assert!(app.columns.is_empty());
@@ -1518,10 +1634,10 @@ mod tests {
         app.on_key(ch('a'));
         assert_eq!(app.request, None);
         app.on_key(key(KeyCode::Enter));
-        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 3));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Ssh)) if h.id == 3));
         app.request = None;
         app.on_key(ch(' '));
-        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 3));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Ssh)) if h.id == 3));
     }
 
     #[test]
@@ -1532,7 +1648,7 @@ mod tests {
         app.on_key(ch('x'));
         assert!(matches!(&app.mode, Mode::ConfirmClose { id: 2, .. }));
         app.on_key(ch('y'));
-        assert_eq!(app.request.take(), Some(Request::CloseSession(2)));
+        assert_eq!(app.request.take(), Some(Request::CloseSessions(2)));
         assert!(app.columns.is_empty());
 
         app.on_key(ch('q'));
@@ -1550,9 +1666,9 @@ mod tests {
         app.column_areas = vec![(0, Rect::new(30, 1, 40, 20)), (1, Rect::new(72, 1, 40, 20))];
         let at = |kind, column| MouseEvent { kind, column, row: 5, modifiers: KeyModifiers::NONE };
         app.on_mouse(at(MouseEventKind::ScrollUp, 35));
-        assert_eq!(app.request.take(), Some(Request::Scroll(2, 3)));
+        assert_eq!(app.request.take(), Some(Request::Scroll(SessionKey::ssh(2), 3)));
         app.on_mouse(at(MouseEventKind::ScrollDown, 80));
-        assert_eq!(app.request.take(), Some(Request::Scroll(3, -3)));
+        assert_eq!(app.request.take(), Some(Request::Scroll(SessionKey::ssh(3), -3)));
         app.on_mouse(at(MouseEventKind::Down(MouseButton::Left), 35));
         assert_eq!((app.focus, app.active_column), (Focus::Terminal, 0));
     }
@@ -1656,7 +1772,7 @@ mod tests {
         app.on_key(key(KeyCode::BackTab));
         assert_eq!(app.focus, Focus::Terminal);
         app.on_key(key(KeyCode::Tab));
-        assert_eq!(app.request.take(), Some(Request::Input(2, key(KeyCode::Tab))));
+        assert_eq!(app.request.take(), Some(Request::Input(SessionKey::ssh(2), key(KeyCode::Tab))));
         app.on_key(alt('h'));
         app.on_key(key(KeyCode::Tab));
         app.on_key(key(KeyCode::Tab));
@@ -1690,7 +1806,7 @@ mod tests {
         assert_eq!(app.table.selected(), Some(1));
         assert_eq!(app.outcome, None);
         app.on_mouse(click(6));
-        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 2));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Ssh)) if h.id == 2));
         // Clicking outside the rows does nothing.
         app.on_mouse(click(14));
         assert_eq!(app.table.selected(), Some(1));

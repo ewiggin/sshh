@@ -28,7 +28,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   disables it). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
 - `db`: SQLite + migrations via `PRAGMA user_version` (append to `MIGRATIONS`, never edit existing ones).
 - `tui`: `sshh` without args, and the wizard. Lazygit-style layout: search + list + details on the
-  left, terminal columns on the right (`App::columns` = connection ids left to right,
+  left, terminal columns on the right (`App::columns` = `SessionKey`s left to right, i.e. connection
+  id + `SessionKind` (Ssh / Sftp): a connection can have both; `App::host_session` aggregates them,
   `active_column`, `zoomed`). The list is "column 0" for Alt-h/l. Requests that target a session carry
   its id (`Input`, `Paste`, `Scroll`); the loop resizes each session to its `App::column_areas` rect.
   `app.rs` = state + events (testable without a terminal); side effects (DB, clipboard, $EDITOR,
