@@ -190,8 +190,11 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
    list = column 0      ◄── Alt-h ── Alt-l ──►     Alt-1 … Alt-9
 ```
 
-- **Left**: search, a simplified connection list and the details of the selected one (target,
-  options, tags, usage, notes).
+- **Left**: search, the connection list (alias, name and tags) and the details of the selected one
+  (target, options, tags, usage, notes). The list pane has two tabs, **Connections** and **Tags**
+  (switch with `[` / `]` or a click on the tab): the Tags tab lists every tag with its number of
+  connections, the details pane previews the connections of the highlighted tag, and `Space` goes back
+  to the connections filtered by that tag (`#tag` in the search box; `Esc` clears it).
 - **Right**: **terminal columns**, each showing the embedded ssh session of one connection, side by
   side. Connections with a live session are marked with a green `●` in the list (a grey `○` means
   the session ended). Closing a column doesn't close its session. With no column open, the right side
@@ -237,6 +240,7 @@ List and general keys:
 | `Ctrl-f` / `Ctrl-b`, `PgDn` / `PgUp` | page down / up |
 | `Tab` / `Shift-Tab` | next / previous pane: list → details → active column (if any; inside it `Tab` goes to ssh, leave with `Alt-h`) |
 | `/` | search |
+| `[` / `]` | switch tab: Connections / Tags (in Tags, `Space` or `Enter` filters by the tag, `Esc` goes back) |
 | `a` | add a connection |
 | `Enter`, `e` | edit |
 | `t` | edit tags |
@@ -271,7 +275,8 @@ filtered while you type and matching letters are highlighted.
 
 | Action | Effect |
 |---|---|
-| Click on a row | select |
+| Click on a tab title | switch to that tab |
+| Click on a row | select (a tag in the Tags tab; double click filters by it) |
 | Double click | open the session (like `Space`) |
 | Click on a column | focus it |
 | Wheel | move · scroll the details · scroll back the history of the column under the pointer |

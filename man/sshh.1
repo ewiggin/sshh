@@ -141,8 +141,8 @@ It only appears when standard input, output and error are terminals, and
 can be disabled with
 .BR SSHH_NO_WIZARD=1 .
 .SH TERMINAL UI
-The left side shows a search box, the connection list and the details of
-the selected connection.
+The left side shows a search box, the connection list (alias, name and
+tags) and the details of the selected connection.
 A green dot marks connections with a live session; a grey circle, a
 session that ended.
 The right side shows
@@ -255,6 +255,22 @@ clears it, and
 or
 .B Esc
 go back to the list keeping the filter.
+.TP
+.BR [ ", " ]
+Switch the list between the
+.B Connections
+and
+.B Tags
+tabs.
+The Tags tab lists every tag with its number of connections, and the
+details pane previews the connections of the highlighted tag.
+There,
+.B Space
+or
+.B Enter
+goes back to the connections filtered by that tag, and
+.B Esc
+goes back without filtering.
 .TP
 .B a
 Add a connection.

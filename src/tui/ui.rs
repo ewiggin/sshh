@@ -12,12 +12,12 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap};
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use super::app::{App, Focus, Mode, SessionState};
+use super::app::{App, Focus, ListTab, Mode, SessionState};
 use super::session::Session;
 use crate::cli::{format_date, relative_time};
 use crate::connect::shell_quote;
 use crate::db;
-use crate::model::Host;
+use crate::model::{Host, HostData};
 
 pub const ACCENT: Color = Color::Cyan;
 const MATCH: Color = Color::Yellow;
@@ -128,10 +128,47 @@ fn session_dot(state: Option<SessionState>) -> Span<'static> {
     }
 }
 
+/// Bordered block for the list pane with its tabs as the title; records where
+/// each tab was drawn so it can be clicked.
+fn list_block(app: &mut App, area: Rect) -> Block<'static> {
+    let focused = pane_focused(app, Focus::List);
+    let tabs = [
+        (ListTab::Connections, format!(" Connections {}/{} ", app.entries.len(), app.hosts.len())),
+        (ListTab::Tags, format!(" Tags {} ", app.tags.len())),
+    ];
+    let mut spans = Vec::new();
+    let mut x = area.x + 1;
+    app.tab_areas.clear();
+    for (i, (tab, text)) in tabs.into_iter().enumerate() {
+        if i > 0 {
+            spans.push("·".dim());
+            x += 1;
+        }
+        let width = text.chars().count() as u16;
+        app.tab_areas.push((tab, Rect::new(x, area.y, width, 1)));
+        x += width;
+        let style = match (tab == app.tab, focused) {
+            (true, true) => Style::new().fg(ACCENT).bold(),
+            (true, false) => Style::new().bold(),
+            (false, _) => Style::new().dim(),
+        };
+        spans.push(Span::styled(text, style));
+    }
+    let mut block = Block::bordered().border_type(BorderType::Rounded).title(Line::from(spans));
+    if app.tab == ListTab::Connections {
+        // On the bottom border: the top one is for the tabs.
+        block = block.title_bottom(Line::from(format!(" {} ", app.sort.label()).dim()).right_aligned());
+    }
+    if focused { block.border_style(Style::new().fg(ACCENT)) } else { block.border_style(Style::new().dim()) }
+}
+
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let title = format!("Connections {}/{} · {}", app.entries.len(), app.hosts.len(), app.sort.label());
-    let block = block(&title, pane_focused(app, Focus::List));
+    let block = list_block(app, area);
     app.rows_area = block.inner(area);
+    if app.tab == ListTab::Tags {
+        draw_tags(frame, app, block, area);
+        return;
+    }
 
     if app.entries.is_empty() {
         let msg = if app.hosts.is_empty() { "No connections yet.\nPress 'a' to add one." } else { "No results." };
@@ -150,6 +187,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
             spans.push(Span::raw("  "));
             spans.extend(highlighted(name, &e.name_hl).into_iter().map(|s| s.dim()));
         }
+        if !d.tags.is_empty() {
+            spans.push(Span::raw("  "));
+            spans.push(tags_text(d).fg(TAG).dim());
+        }
         Row::new([Cell::from(session_dot(app.sessions.get(&host.id).copied())), Cell::from(Line::from(spans))])
     });
     let table = Table::new(rows, [Constraint::Length(1), Constraint::Fill(1)])
@@ -160,12 +201,42 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(table, area, &mut app.table);
 }
 
+/// The Tags tab: every tag with its number of connections.
+fn draw_tags(frame: &mut Frame, app: &mut App, block: Block<'static>, area: Rect) {
+    if app.tags.is_empty() {
+        let p = Paragraph::new("No tags yet.\nAdd them with 't'.").dim().centered();
+        let [middle] = Layout::vertical([Constraint::Length(2)]).flex(Flex::Center).areas(app.rows_area);
+        frame.render_widget(block, area);
+        frame.render_widget(p, middle);
+        return;
+    }
+    let rows = app.tags.iter().map(|t| {
+        Row::new([
+            Cell::from(format!("#{}", t.name).fg(TAG)),
+            Cell::from(Line::from(t.count.to_string()).right_aligned().dim()),
+        ])
+    });
+    let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
+        .block(block)
+        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+        .highlight_spacing(HighlightSpacing::Never);
+    frame.render_stateful_widget(table, area, &mut app.tag_table);
+}
+
+fn tags_text(d: &HostData) -> String {
+    d.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
+}
+
 fn tags_line(host: &Host) -> Line<'static> {
     Line::from(host.data.tags.iter().map(|t| format!("#{t} ").fg(TAG)).collect::<Vec<_>>())
 }
 
 fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     app.detail_area = area;
+    if app.tab == ListTab::Tags {
+        draw_tag_preview(frame, app, area);
+        return;
+    }
     let block = block("Details", pane_focused(app, Focus::Detail));
     let Some(host) = app.selected_host() else {
         frame.render_widget(block, area);
@@ -210,6 +281,36 @@ fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     // Clamp the scroll so the pane never ends up empty.
+    let max_scroll = (p.line_count(area.width) as u16).saturating_sub(area.height);
+    let scroll = app.detail_scroll.min(max_scroll);
+    frame.render_widget(p.scroll((scroll, 0)), area);
+    app.detail_scroll = scroll;
+}
+
+/// Details pane in the Tags tab: the connections of the highlighted tag.
+fn draw_tag_preview(frame: &mut Frame, app: &mut App, area: Rect) {
+    let Some(tag) = app.selected_tag() else {
+        frame.render_widget(block("Details", false), area);
+        return;
+    };
+    let noun = if tag.count == 1 { "connection" } else { "connections" };
+    let title = format!("#{} · {} {noun}", tag.name, tag.count);
+    let lines: Vec<Line> = app
+        .hosts
+        .iter()
+        .filter(|h| h.data.tags.contains(&tag.name))
+        .map(|h| {
+            Line::from(vec![
+                session_dot(app.sessions.get(&h.id).copied()),
+                " ".into(),
+                h.data.alias.clone().bold(),
+                "  ".into(),
+                h.data.target().dim(),
+            ])
+        })
+        .collect();
+    let block = block(&title, pane_focused(app, Focus::Detail));
+    let p = Paragraph::new(lines).block(block);
     let max_scroll = (p.line_count(area.width) as u16).saturating_sub(area.height);
     let scroll = app.detail_scroll.min(max_scroll);
     frame.render_widget(p.scroll((scroll, 0)), area);
@@ -430,6 +531,14 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             &[("Enter", "connect"), ("Esc Alt-h", "back"), ("Alt-w", "close column")]
         }
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
+        _ if app.tab == ListTab::Tags => &[
+            ("Space", "filter by tag"),
+            ("j/k", "move"),
+            ("[ ]", "tabs"),
+            ("Esc", "connections"),
+            ("?", "help"),
+            ("q", "quit"),
+        ],
         _ => &[
             ("Space", "connect"),
             ("Alt-v", "new column"),
@@ -437,6 +546,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             ("/", "search"),
             ("a", "add"),
             ("Enter/e", "edit"),
+            ("[ ]", "tags"),
             ("x", "close session"),
             ("f", "full screen"),
             ("?", "help"),
@@ -495,6 +605,7 @@ fn draw_help(frame: &mut Frame) {
         ("Ctrl-f/b", "page down / up"),
         ("Tab / S-Tab", "next / previous pane (list, details, terminal)"),
         ("/", "search (filters while typing; #tag by tag)"),
+        ("[ / ]", "tabs: connections / tags (Space on a tag filters)"),
         ("Esc", "back / clear search"),
         ("", ""),
         ("a", "add connection"),

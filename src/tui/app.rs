@@ -123,6 +123,21 @@ impl SortOrder {
     }
 }
 
+/// Tabs of the list pane.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ListTab {
+    #[default]
+    Connections,
+    Tags,
+}
+
+/// A tag and how many connections have it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagEntry {
+    pub name: String,
+    pub count: usize,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Focus {
     #[default]
@@ -148,6 +163,12 @@ pub struct App {
     pub mode: Mode,
     pub focus: Focus,
     pub sort: SortOrder,
+    pub tab: ListTab,
+    /// Every tag in use, alphabetically, for the Tags tab.
+    pub tags: Vec<TagEntry>,
+    pub tag_table: TableState,
+    /// Where each tab title was drawn (for the mouse).
+    pub tab_areas: Vec<(ListTab, Rect)>,
     pub table: TableState,
     pub detail_scroll: u16,
     /// First key of a two-key shortcut (`gg`, `dd`, `yy`).
@@ -186,6 +207,10 @@ impl App {
             mode: Mode::Normal,
             focus: Focus::List,
             sort: SortOrder::default(),
+            tab: ListTab::default(),
+            tags: Vec::new(),
+            tag_table: TableState::default(),
+            tab_areas: Vec::new(),
             table: TableState::default(),
             detail_scroll: 0,
             pending: None,
@@ -401,6 +426,89 @@ impl App {
             scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
         }
         self.entries = scored.into_iter().map(|(_, e)| e).collect();
+        self.refresh_tags();
+    }
+
+    /// Recomputes the Tags tab, keeping the same tag selected if it still exists.
+    fn refresh_tags(&mut self) {
+        let selected = self.selected_tag().map(|t| t.name.clone());
+        let mut counts: Vec<TagEntry> = Vec::new();
+        for tag in self.hosts.iter().flat_map(|h| &h.data.tags) {
+            match counts.iter_mut().find(|t| t.name == *tag) {
+                Some(entry) => entry.count += 1,
+                None => counts.push(TagEntry { name: tag.clone(), count: 1 }),
+            }
+        }
+        counts.sort_by_key(|t| t.name.to_lowercase());
+        self.tags = counts;
+        let index = selected
+            .and_then(|name| self.tags.iter().position(|t| t.name == name))
+            .unwrap_or_else(|| self.tag_table.selected().unwrap_or(0));
+        self.select_tag(index);
+    }
+
+    pub fn selected_tag(&self) -> Option<&TagEntry> {
+        self.tags.get(self.tag_table.selected()?)
+    }
+
+    fn select_tag(&mut self, index: usize) {
+        let selected = self.tags.len().checked_sub(1).map(|last| index.min(last));
+        if selected != self.tag_table.selected() {
+            self.detail_scroll = 0;
+        }
+        self.tag_table.select(selected);
+    }
+
+    fn move_tag_by(&mut self, delta: isize) {
+        let current = self.tag_table.selected().unwrap_or(0) as isize;
+        self.select_tag(current.saturating_add(delta).max(0) as usize);
+    }
+
+    fn switch_tab(&mut self) {
+        self.tab = match self.tab {
+            ListTab::Connections => ListTab::Tags,
+            ListTab::Tags => ListTab::Connections,
+        };
+        self.mode = Mode::Normal;
+        self.focus = Focus::List;
+        self.detail_scroll = 0;
+    }
+
+    /// Space on a tag: back to the connections, filtered by that tag.
+    fn apply_tag(&mut self) {
+        let Some(tag) = self.selected_tag() else { return };
+        self.query = format!("#{}", tag.name);
+        self.tab = ListTab::Connections;
+        self.mode = Mode::Normal;
+        self.focus = Focus::List;
+        self.query_changed();
+    }
+
+    /// Keys of the Tags tab; returns false for the general keys it lets through.
+    fn on_tags_key(&mut self, key: KeyEvent, ctrl: bool, pending: Option<char>) -> bool {
+        let page = self.page();
+        match key.code {
+            KeyCode::Char(' ') | KeyCode::Enter => self.apply_tag(),
+            KeyCode::Esc => self.tab = ListTab::Connections,
+            KeyCode::Char('d') if ctrl => self.move_tag_by(page / 2),
+            KeyCode::Char('u') if ctrl => self.move_tag_by(-page / 2),
+            KeyCode::Char('f') if ctrl => self.move_tag_by(page),
+            KeyCode::Char('b') if ctrl => self.move_tag_by(-page),
+            KeyCode::Char('j') | KeyCode::Down => self.move_tag_by(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_tag_by(-1),
+            KeyCode::Char('G') | KeyCode::End => self.move_tag_by(isize::MAX),
+            KeyCode::Home => self.select_tag(0),
+            KeyCode::PageDown => self.move_tag_by(page),
+            KeyCode::PageUp => self.move_tag_by(-page),
+            KeyCode::Char('g') if pending == Some('g') => self.select_tag(0),
+            KeyCode::Char('g') => self.pending = Some('g'),
+            KeyCode::Char('q' | '?' | '/' | '[' | ']' | 'a' | 'R') | KeyCode::Tab | KeyCode::BackTab => {
+                return false;
+            }
+            // Connection actions don't apply here.
+            _ => {}
+        }
+        true
     }
 
     /// After the query changes, the best result is selected.
@@ -670,7 +778,14 @@ impl App {
         if self.focus == Focus::Detail && self.on_detail_key(key, ctrl) {
             return;
         }
+        if self.focus == Focus::List
+            && self.tab == ListTab::Tags
+            && self.on_tags_key(key, ctrl, pending)
+        {
+            return;
+        }
         match key.code {
+            KeyCode::Char('[' | ']') => self.switch_tab(),
             KeyCode::Char('q') => self.quit(),
             // Esc goes back one level; it never quits the app.
             KeyCode::Esc if pending.is_none() && !self.query.is_empty() => {
@@ -679,7 +794,10 @@ impl App {
             }
             KeyCode::Char(' ') => self.connect_selected(),
             KeyCode::Enter => self.edit_selected(form::ALIAS),
-            KeyCode::Char('/') => self.mode = Mode::Search,
+            KeyCode::Char('/') => {
+                self.tab = ListTab::Connections;
+                self.mode = Mode::Search;
+            }
             KeyCode::Char('?') => self.mode = Mode::Help,
             KeyCode::Tab => self.cycle_focus(true),
             KeyCode::BackTab => self.cycle_focus(false),
@@ -839,10 +957,18 @@ impl App {
             }
             (_, MouseEventKind::ScrollDown) if in_detail => self.scroll_detail(1),
             (_, MouseEventKind::ScrollUp) if in_detail => self.scroll_detail(-1),
+            (_, MouseEventKind::ScrollDown) if self.tab == ListTab::Tags => self.move_tag_by(1),
+            (_, MouseEventKind::ScrollUp) if self.tab == ListTab::Tags => self.move_tag_by(-1),
             (_, MouseEventKind::ScrollDown) => self.move_by(1),
             (_, MouseEventKind::ScrollUp) => self.move_by(-1),
             (_, MouseEventKind::Down(MouseButton::Left)) => {
-                if self.search_area.contains(pos) {
+                let tab = self.tab_areas.iter().find(|(_, area)| area.contains(pos)).map(|(t, _)| *t);
+                if let Some(tab) = tab {
+                    if tab != self.tab {
+                        self.switch_tab();
+                    }
+                } else if self.search_area.contains(pos) {
+                    self.tab = ListTab::Connections;
                     self.mode = Mode::Search;
                 } else if let Some(index) = column.filter(|_| in_terminal) {
                     self.focus_column(index);
@@ -850,27 +976,42 @@ impl App {
                     self.mode = Mode::Normal;
                     self.focus = Focus::Detail;
                 } else if self.rows_area.contains(pos) {
-                    self.click_row(self.table.offset() + usize::from(pos.y - self.rows_area.y));
+                    let offset = match self.tab {
+                        ListTab::Connections => self.table.offset(),
+                        ListTab::Tags => self.tag_table.offset(),
+                    };
+                    self.click_row(offset + usize::from(pos.y - self.rows_area.y));
                 }
             }
             _ => {}
         }
     }
 
-    /// A click selects the row; a double click on the same row connects.
+    /// A click selects the row; a double click on the same row connects (or,
+    /// in the Tags tab, filters by the tag).
     fn click_row(&mut self, row: usize) {
-        if row >= self.entries.len() {
+        let rows = match self.tab {
+            ListTab::Connections => self.entries.len(),
+            ListTab::Tags => self.tags.len(),
+        };
+        if row >= rows {
             return;
         }
         self.mode = Mode::Normal;
         self.focus = Focus::List;
-        self.select(row);
+        match self.tab {
+            ListTab::Connections => self.select(row),
+            ListTab::Tags => self.select_tag(row),
+        }
         let double = self
             .last_click
             .is_some_and(|(r, at)| r == row && at.elapsed() < DOUBLE_CLICK);
         if double {
             self.last_click = None;
-            self.connect_selected();
+            match self.tab {
+                ListTab::Connections => self.connect_selected(),
+                ListTab::Tags => self.apply_tag(),
+            }
         } else {
             self.last_click = Some((row, Instant::now()));
         }
@@ -1018,6 +1159,64 @@ mod tests {
         app.on_key(ch(' '));
         assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.data.alias == "db1"));
         assert_eq!(app.focus, Focus::Terminal);
+    }
+
+    #[test]
+    fn tags_tab_lists_tags_with_counts() {
+        let app = app();
+        let tags: Vec<(&str, usize)> = app.tags.iter().map(|t| (t.name.as_str(), t.count)).collect();
+        assert_eq!(tags, [("db", 1), ("dev", 1), ("prod", 2), ("web", 1)]);
+    }
+
+    #[test]
+    fn space_on_a_tag_filters_the_connections() {
+        let mut app = app();
+        app.on_key(ch(']'));
+        assert_eq!(app.tab, ListTab::Tags);
+        app.on_key(ch('j'));
+        app.on_key(ch('j'));
+        assert_eq!(app.selected_tag().unwrap().name, "prod");
+        app.on_key(ch(' '));
+        assert_eq!((app.tab, app.query.as_str()), (ListTab::Connections, "#prod"));
+        assert_eq!(aliases(&app), ["web1", "db1"]);
+        assert_eq!(app.request, None);
+        // Esc clears the filter as usual.
+        app.on_key(key(KeyCode::Esc));
+        assert_eq!(aliases(&app).len(), 3);
+    }
+
+    #[test]
+    fn tags_tab_ignores_connection_actions() {
+        let mut app = app();
+        app.on_key(ch('['));
+        for k in [ch('x'), ch('e'), ch('f'), ch('d'), ch('d'), ch('y'), ch('y')] {
+            app.on_key(k);
+        }
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.request, None);
+        app.on_key(key(KeyCode::Esc));
+        assert_eq!(app.tab, ListTab::Connections);
+        // `/` from the Tags tab searches the connections.
+        app.on_key(ch(']'));
+        app.on_key(ch('/'));
+        assert!(matches!(app.mode, Mode::Search));
+        assert_eq!(app.tab, ListTab::Connections);
+    }
+
+    #[test]
+    fn clicking_a_tab_switches_to_it() {
+        let mut app = app();
+        app.tab_areas = vec![(ListTab::Connections, Rect::new(1, 3, 18, 1)), (ListTab::Tags, Rect::new(20, 3, 8, 1))];
+        let click = |column| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.on_mouse(click(22));
+        assert_eq!(app.tab, ListTab::Tags);
+        app.on_mouse(click(5));
+        assert_eq!(app.tab, ListTab::Connections);
     }
 
     #[test]
