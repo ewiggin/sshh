@@ -5,6 +5,7 @@
 #   make static && make install-static               # fully static binary (musl)
 #   make dist                                        # release tarball in dist/
 #   make dist MUSL_TARGET=aarch64-unknown-linux-musl # (on an aarch64 machine)
+#   make version v0.2.0 (or patch|minor|major)       # bump the version and commit
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
@@ -20,7 +21,7 @@ STATIC_BIN := target/$(MUSL_TARGET)/release/sshh
 # No version in the name, so .../releases/latest/download/<name> always works.
 DIST_NAME := sshh-$(MUSL_TARGET)
 
-.PHONY: all build static install install-static install-files uninstall dist man lint-man test
+.PHONY: all build static install install-static install-files uninstall dist version man lint-man test
 
 all: build
 
@@ -57,6 +58,20 @@ dist: static
 	cd dist && sha256sum $(DIST_NAME).tar.gz > $(DIST_NAME).tar.gz.sha256
 	rm -rf dist/$(DIST_NAME)
 	@echo "dist/$(DIST_NAME).tar.gz"
+
+# `make version v0.2.0`: bump the version (Cargo.toml, Cargo.lock, man page) and
+# commit "bump to v0.2.0". The word after `version` is its argument, not a
+# target, so it gets an empty rule.
+ifeq (version,$(firstword $(MAKECMDGOALS)))
+VERSION_ARG := $(word 2,$(MAKECMDGOALS))
+ifneq ($(VERSION_ARG),)
+$(eval $(VERSION_ARG):;@:)
+endif
+endif
+
+version:
+	@test -n "$(VERSION_ARG)" || { echo "usage: make version <vX.Y.Z | patch | minor | major>" >&2; exit 1; }
+	@scripts/bump.sh $(VERSION_ARG)
 
 # Preview the man page without installing it.
 man:

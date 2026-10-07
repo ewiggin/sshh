@@ -629,9 +629,16 @@ server, like tmux), character-wise selection in history mode.
 
 ### Releasing
 
-1. Bump `version` in `Cargo.toml` (and `Cargo.lock` with `cargo build`), update the version in
-   `man/sshh.1`, and commit.
-2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+1. Bump the version and commit it:
+
+   ```sh
+   make version v0.2.0      # or: make version patch | minor | major
+   ```
+
+   It updates `Cargo.toml`, `Cargo.lock` and the man page (version and date) and commits them as
+   `bump to v0.2.0`. It refuses to run with uncommitted changes, a version that isn't greater than
+   the current one, or an existing tag.
+2. Tag and push (the command prints it): `git tag v0.2.0 && git push origin main v0.2.0`.
 
 The release workflow checks that the tag matches `Cargo.toml`, runs the tests and publishes static
 binaries for x86_64 and aarch64 Linux with their SHA-256 checksums.

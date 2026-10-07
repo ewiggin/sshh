@@ -73,6 +73,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   install.sh, static build. Release (`release.yml`): on tag `vX.Y.Z` (must match Cargo.toml),
   builds `make dist` for x86_64 and aarch64 musl and publishes `sshh-<target>.tar.gz` + `.sha256`
   (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
+- Versions: `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh + GNU sed) updates
+  Cargo.toml, Cargo.lock and the man page `.TH` line and commits "bump to vX.Y.Z"; then tag + push.
 - Install: `make && make install` (PREFIX defaults to `~/.local`; `install` never builds), or
   `install.sh` (POSIX sh, used as `curl … | sh`): downloads the release tarball for Linux
   x86_64/aarch64 and checks its sha256; falls back to building from source (clone + make), and

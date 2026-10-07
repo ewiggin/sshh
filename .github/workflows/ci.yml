@@ -28,10 +28,11 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y groff
           make lint-man
-      - name: install.sh
+      - name: Shell scripts
         run: |
           sh -n install.sh
-          shellcheck install.sh
+          sh -n scripts/bump.sh
+          shellcheck install.sh scripts/bump.sh
 
   static:
     runs-on: ubuntu-latest
