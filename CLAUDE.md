@@ -52,7 +52,13 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   JSON format = `model::HostData` (empty fields omitted when serializing).
 
 ## Development
-- `cargo test`, `cargo clippy --all-targets`.
+- `cargo test`, `cargo clippy --all-targets`, `make lint-man`.
+- Docs to keep in sync when changing subcommands, options or shortcuts: `README.md`, the TUI help
+  (`ui::draw_help`, footer hints) and the man page `man/sshh.1` (roff, written by hand).
+- Install: `make && make install` (PREFIX defaults to `~/.local`; `install` never builds), or
+  `install.sh` (POSIX sh, used as `curl … | sh`): checks requirements, clones to a temp dir (or uses
+  the clone it runs from), runs `make build` and `make install`, using sudo only for the copy.
+  Test it with `SSHH_REPO=file://… SSHH_PREFIX=<tmp>`; keep it `sh`/dash compatible.
 - Manual tests without connecting: `SSHH_DB=/tmp/x.db SSHH_SSH=<script printing its args> sshh ...`.
   Set these per command; don't `export` them in the user's shell.
 - `SSHH_DEBUG=1` prints to stderr how the destination is resolved and the command that runs.

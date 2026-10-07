@@ -33,11 +33,53 @@ SSH connection manager for the terminal, written in Rust.
 
 ## Installation
 
-Requirements: Rust ≥ 1.88 (2024 edition) and OpenSSH. SQLite is bundled into the binary.
+Requirements: Rust ≥ 1.88 (2024 edition), git, make and OpenSSH. SQLite is bundled into the
+binary.
 
 ```sh
-cargo build --release
-install -Dm755 target/release/sshh ~/.local/bin/sshh
+curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/master/install.sh | sh
+```
+
+The script checks the requirements, builds sshh from source in a temporary directory and installs
+the binary and the man page for your user, in `~/.local/bin/sshh` and
+`~/.local/share/man/man1/sshh.1` (no sudo needed), so `man sshh` works. It warns you if
+`~/.local/bin` is not in your `PATH`. Run it again to update.
+
+| Variable / option | Effect |
+|---|---|
+| `SSHH_PREFIX=/usr/local` | install somewhere else (uses `sudo` only for the final copy if needed; as root the default is `/usr/local`) |
+| `SSHH_REF=v0.1.0` | install a branch or tag instead of `master` |
+| `sh -s -- --uninstall` | remove the binary and the man page (your connections are kept) |
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/master/install.sh | SSHH_PREFIX=/usr/local sh
+curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/master/install.sh | sh -s -- --uninstall
+```
+
+### From a clone
+
+```sh
+git clone https://github.com/ewiggin/sshh.git && cd sshh && make && make install
+```
+
+`./install.sh` also works inside a clone (it installs that code). To update a clone, run
+`git pull && make && make install`.
+
+Other options, from the cloned directory:
+
+```sh
+make && sudo make install PREFIX=/usr/local      # system wide
+make install DESTDIR="$pkgdir" PREFIX=/usr       # packaging
+make uninstall                                   # same PREFIX/DESTDIR as when installing
+make man                                         # preview the man page without installing it
+```
+
+`make install` doesn't compile, so `sudo make install` never runs cargo as root.
+
+Binary only, without the man page and without cloning (installs to `~/.cargo/bin`):
+
+```sh
+cargo install --git https://github.com/ewiggin/sshh.git
 ```
 
 Optionally, to always use it instead of `ssh`:
@@ -471,6 +513,7 @@ OSC 52 escape sequence, which most terminals support and which also works over s
 ```sh
 cargo test
 cargo clippy --all-targets
+make lint-man        # check the man page with groff
 ```
 
 To test without connecting anywhere, point `SSHH_SSH` to something that prints its arguments and use

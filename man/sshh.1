@@ -1,0 +1,531 @@
+.TH SSHH 1 2026-10-07 "sshh 0.1.0" "User Commands"
+.\" Keep in sync with the CLI (src/cli.rs), the TUI shortcuts (src/tui) and README.md.
+.SH NAME
+sshh \- SSH connection manager with a terminal UI
+.SH SYNOPSIS
+.SY sshh
+.OP ssh-options
+.I destination
+.RI [ command " [" argument ...]]
+.YS
+.SY sshh
+.YS
+.SY sshh
+.I subcommand
+.RI [ options ]
+.YS
+.SH DESCRIPTION
+.B sshh
+keeps a database of SSH connections with a name, description, tags and
+notes, and lets you use them from a terminal UI or directly from the
+command line, just like
+.BR ssh (1).
+.PP
+It never reimplements SSH: every connection runs the system
+.BR ssh ,
+so
+.BR ssh_config (5),
+.BR ssh-agent (1),
+.BR ProxyJump ,
+.BR ControlMaster ,
+known_hosts and hardware keys keep working.
+.B sshh
+doesn't store passwords or keys.
+.PP
+It works in three ways:
+.TP
+.B Wrapper mode
+.B sshh
+.I destination
+accepts the same arguments as
+.BR ssh .
+See
+.BR "WRAPPER MODE" .
+.TP
+.B Terminal UI
+.B sshh
+without arguments opens the TUI: a connection list with fuzzy search and
+details, and embedded ssh sessions in columns next to it.
+See
+.BR "TERMINAL UI" .
+If standard output is not a terminal, it prints the list instead.
+.TP
+.B Subcommands
+For scripts and quick changes.
+See
+.BR SUBCOMMANDS .
+.SH WRAPPER MODE
+.B sshh
+parses the ssh command line to find the destination
+.RI ( [user@]host
+or
+.IR ssh://[user@]host[:port] )
+and then always runs
+.B ssh
+with
+.BR exec (3).
+Depending on the destination:
+.TP
+.B The alias of a saved connection
+Its options are added before the destination as
+.BI \-o " Key=Value"
+.RB ( HostName ,
+.BR User ,
+.BR Port ,
+.BR IdentityFile ,
+.B ProxyJump
+and any extra option), but only those you didn't set yourself:
+.BR \-p ,
+.BR \-l ,
+.BR \-i ,
+.B \-J
+and
+.B \-o
+on the command line always win.
+.TP
+.B A target matching a saved connection
+When
+.I user@hostname:port
+is the same as a saved connection, the arguments are passed untouched and
+the connection is recorded in the history.
+.B sshh
+asks
+.B "ssh \-G"
+where ssh would really connect, so aliases from
+.I ~/.ssh/config
+are recognised too.
+.TP
+.B A destination that isn't saved
+In an interactive terminal, a wizard offers to save it before connecting
+(see
+.BR WIZARD ).
+.TP
+.B No destination, or unknown arguments
+Everything is passed to
+.B ssh
+unchanged (for example
+.B "sshh \-V"
+or
+.BR "sshh \-Q cipher" ).
+.PP
+Calls that only query
+.RB ( \-G ,
+.BR \-V ,
+.BR \-O ,
+.BR \-Q )
+never open the wizard and aren't recorded in the history.
+If something of its own fails (database, parser),
+.B sshh
+prints a warning and runs
+.B ssh
+with the original arguments.
+.PP
+To connect to a host named like a subcommand, use
+.BR "sshh \-\- " \fIhost\fR.
+.SH WIZARD
+When the destination is not saved, a form prefilled from
+.B "ssh \-G"
+(host, user, port, ProxyJump) shows up.
+The suggested alias is the short host name.
+.TP
+.B Enter
+Save the connection and connect.
+.TP
+.B Esc
+Connect without saving.
+.TP
+.B Ctrl\-c
+Cancel; don't connect.
+.PP
+It only appears when standard input, output and error are terminals, and
+can be disabled with
+.BR SSHH_NO_WIZARD=1 .
+.SH TERMINAL UI
+The left side shows a search box, the connection list and the details of
+the selected connection.
+A green dot marks connections with a live session; a grey circle, a
+session that ended.
+The right side shows
+.I terminal columns
+side by side, each with the embedded ssh session of one connection, or an
+overview of the selected connection when no column is open.
+.PP
+Each embedded session is the system
+.B ssh
+running in a pseudo terminal, so password prompts, host key questions and
+full\-screen programs work as in a normal terminal.
+Sessions follow the size of their column, keep 5000 lines of scrollback
+(mouse wheel) and accept pastes.
+Quitting
+.B sshh
+closes them, after asking.
+.SS Columns
+These keys work from anywhere, also while typing in a session.
+.TP
+.B Enter
+(in the list) Show the selected connection in the active column, opening
+its session.
+If it is already in a column, focus that column; if its session ended,
+reconnect.
+.TP
+.B Alt\-v
+Show the selected connection in a new column right of the active one.
+Each column needs at least 40 characters; up to 9 columns.
+.TP
+.BR Alt\-Left ", " Alt\-Right ", " Alt\-h ", " Alt\-l
+Move to the column on the left or right.
+The list is the leftmost column.
+.TP
+.BR Alt\-1 " .. " Alt\-9
+Jump to column
+.IR N .
+.TP
+.BR Alt\-j ", " Alt\-k
+In a column: show the next or previous session there, skipping sessions
+visible in other columns.
+In the list: select the next or previous connection with a session.
+.TP
+.B Alt\-w
+Close the active column.
+The session keeps running.
+.TP
+.BR Alt\-f ", " Alt\-z
+Toggle full screen for the active column, inside
+.BR sshh .
+.TP
+.BR Alt\-H ", " Alt\-L
+(Alt\-Shift\-h, Alt\-Shift\-l) Move the active column left or right.
+.PP
+While a column has focus, every other key goes to its ssh session,
+including
+.BR Esc ,
+.BR Ctrl\-c ,
+.B Tab
+and
+.BR Ctrl\-w .
+Note that
+.B Alt\-f
+and
+.B Alt\-Left/Right
+don't reach the remote shell; use
+.B Ctrl\-Left/Right
+there to move by words.
+When a session has ended,
+.B Enter
+reconnects and
+.B Esc
+goes back to the list.
+.SS List
+.TP
+.BR j ", " k ", " Down ", " Up
+Move.
+.TP
+.BR gg ", " G
+Go to the top or the bottom.
+.TP
+.BR Ctrl\-d ", " Ctrl\-u
+Half a page down or up.
+.TP
+.BR Ctrl\-f ", " Ctrl\-b ", " PageDown ", " PageUp
+A page down or up.
+.TP
+.BR Tab ", " Shift\-Tab
+Next or previous pane: list, details, active column.
+.TP
+.B /
+Search.
+The search is fuzzy over alias, name, user, host, description and tags;
+words starting with
+.B #
+filter by tag (prefix match).
+While searching,
+.B Enter
+connects,
+.BR Up / Down ,
+.BR Ctrl\-j / Ctrl\-k
+and
+.BR Ctrl\-n / Ctrl\-p
+move,
+.B Ctrl\-w
+deletes a word,
+.B Ctrl\-u
+clears it and
+.B Esc
+goes back to the list keeping the filter.
+.TP
+.B a
+Add a connection.
+.TP
+.BR e ", " t
+Edit the selected connection, or edit its tags.
+.TP
+.B dd
+Delete the selected connection (asks for confirmation).
+.TP
+.B yy
+Copy the equivalent
+.B ssh
+command to the clipboard.
+.TP
+.B x
+Close the selected connection's session (asks if it is alive).
+.TP
+.B f
+Run a full\-screen
+.BR ssh ;
+.B sshh
+comes back when it exits.
+.TP
+.BR s ", " c
+Open
+.BR sftp (1),
+or install your public key with
+.BR ssh\-copy\-id (1).
+.TP
+.B o
+Change the sort order: recent, most used, alphabetical.
+.TP
+.B R
+Reload the list.
+.TP
+.B ?
+Show the help.
+.TP
+.B Esc
+Go back one level or clear the search.
+It never quits.
+.TP
+.BR q ", " Ctrl\-c
+Quit (asks first if there are live sessions).
+.SS Mouse
+Click selects a connection; a double click opens it.
+Clicking a column focuses it.
+The wheel moves through the list, scrolls the details or scrolls back the
+history of the column under the pointer.
+Hold
+.B Shift
+to select text with the terminal's native selection.
+.SS Form
+The same form adds, edits and saves new connections in the wizard.
+.B Alias
+(unique, no spaces) and
+.B Host
+are required.
+Tags are separated by commas or spaces; extra options go one per line as
+.IR Key=Value .
+.TP
+.BR Tab ", " Shift\-Tab ", " Down ", " Up
+Next or previous field (in multiline fields the arrows move between
+lines).
+.TP
+.B Enter
+Save (inserts a line break in Options and Notes).
+.TP
+.B Ctrl\-s
+Save from any field.
+.TP
+.B Ctrl\-e
+Edit Options or Notes in
+.B $VISUAL
+or
+.BR $EDITOR .
+.TP
+.B Esc
+Cancel (in the wizard: connect without saving).
+.SH SUBCOMMANDS
+.TP
+.B ls
+List the saved connections.
+.TP
+.BI add " alias destination " [ options ]
+Save a connection.
+.I destination
+is
+.I [user@]host
+or
+.IR ssh://[user@]host[:port] .
+Options:
+.BI \-p " port" ,
+.BI \-i " identity" ,
+.BI \-J " jump" ,
+.BI \-o " Key=Value"
+(repeatable),
+.BI \-n " name" ,
+.BI \-d " description" ,
+.BI \-\-notes " text" ,
+.BI \-t " tags"
+(comma separated, repeatable).
+.TP
+.BI rm " alias"
+Delete a connection.
+.TP
+.BR history " [" \fIalias\fR "] [" "\-n \fIN\fR" ]
+Show the latest connections (20 by default), of all connections or of one.
+.TP
+.BR export " [" "\-o \fIfile\fR" ]
+Export the connections to JSON, without history.
+Files are created with mode 0600.
+.TP
+.BI import " file"
+Import connections from a JSON file created by
+.B export
+(or a plain list of connections);
+.B \-
+reads standard input.
+.TP
+.BR import\-ssh\-config " [" \fIfile\fR "] [" "\-t \fItags\fR" ]
+Import the
+.B Host
+blocks with concrete names from
+.I ~/.ssh/config
+(or
+.IR file ),
+following
+.B Include
+directives.
+Wildcard hosts,
+.B Match
+blocks and global options are not imported.
+Comments right above a
+.B Host
+become its notes.
+.TP
+.BR ssh\-config " [" status | sync | print | disable ]
+Manage
+.IR ~/.ssh/config.d/sshh.conf ,
+a generated
+.BR ssh_config (5)
+file with one
+.B Host
+block per connection, so that
+.BR ssh ,
+.BR scp ,
+.BR rsync ,
+.B git
+and other tools know the aliases.
+.B sync
+writes it and keeps it updated after every change;
+.B status
+(the default) tells whether it is enabled and whether
+.I ~/.ssh/config
+includes it;
+.B print
+shows what would be written;
+.B disable
+deletes it.
+.B sshh
+never modifies
+.IR ~/.ssh/config :
+add this line at the top of it yourself, before any
+.B Host
+or
+.B Match
+block:
+.RS
+.PP
+.EX
+Include config.d/sshh.conf
+.EE
+.RE
+.SS Import options
+.B import
+and
+.B import\-ssh\-config
+accept:
+.TP
+.B \-\-on\-conflict skip\fR|\fBoverwrite\fR|\fBrename
+What to do when a connection with the same alias and different data
+exists: skip it (default), replace it, or import it as
+.IR alias\-2 ,
+.IR alias\-3 ...
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be imported without saving anything.
+.SH ENVIRONMENT
+.TP
+.B SSHH_DEBUG
+When set (and not
+.BR 0 ),
+print to standard error how the destination is resolved and the exact
+command that runs.
+.TP
+.B SSHH_NO_WIZARD
+When set (and not
+.BR 0 ),
+never open the wizard for new destinations.
+.TP
+.B SSHH_DB
+Path of the database to use.
+.TP
+.B SSHH_SSH
+Program to run instead of the
+.B ssh
+found in
+.BR PATH .
+.TP
+.B SSHH_INCLUDE_FILE
+Path of the generated ssh_config file.
+.TP
+.BR VISUAL ", " EDITOR
+Editor used by
+.B Ctrl\-e
+in the form (default
+.BR vi ).
+.SH FILES
+.TP
+.I ~/.local/share/sshh/sshh.db
+SQLite database with the connections, tags and history.
+.TP
+.I ~/.ssh/config.d/sshh.conf
+Generated ssh_config file, only when enabled with
+.BR "sshh ssh\-config sync" .
+.SH EXIT STATUS
+In wrapper mode the exit status is the one of
+.BR ssh .
+Errors of
+.B sshh
+itself exit with 255, like
+.BR ssh .
+.SH EXAMPLES
+Connect, offering to save the connection if it is new:
+.PP
+.RS
+.EX
+sshh root@203.0.113.9
+.EE
+.RE
+.PP
+Save a connection and use it with a remote command and a tunnel:
+.PP
+.RS
+.EX
+sshh add web deploy@10.0.0.5 \-p 2222 \-n "Web production" \-t prod,web
+sshh web uptime
+sshh \-L 8080:localhost:80 web
+.EE
+.RE
+.PP
+Import the hosts of
+.I ~/.ssh/config
+after checking what would happen:
+.PP
+.RS
+.EX
+sshh import\-ssh\-config \-\-dry\-run
+sshh import\-ssh\-config \-t ssh\-config
+.EE
+.RE
+.PP
+See how a destination is resolved, without connecting:
+.PP
+.RS
+.EX
+SSHH_DEBUG=1 sshh \-G web
+.EE
+.RE
+.SH SEE ALSO
+.BR ssh (1),
+.BR ssh_config (5),
+.BR sftp (1),
+.BR ssh\-copy\-id (1),
+.BR ssh\-agent (1)
