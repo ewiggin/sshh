@@ -2,6 +2,14 @@
 name = "sshh"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "SSH connection manager with a TUI: use it like ssh, save connections with notes and tags, and keep several sessions open side by side"
+authors = ["Mario Martinez"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ewiggin/sshh"
+readme = "README.md"
+keywords = ["ssh", "tui", "terminal", "connection-manager", "cli"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.104"

@@ -4,6 +4,7 @@
 #   make install DESTDIR="$pkgdir" PREFIX=/usr       # packaging
 #   make static && make install-static               # fully static binary (musl)
 #   make dist                                        # release tarball in dist/
+#   make dist MUSL_TARGET=aarch64-unknown-linux-musl # (on an aarch64 machine)
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
@@ -16,8 +17,8 @@ MUSL_TARGET ?= x86_64-unknown-linux-musl
 
 BIN := target/release/sshh
 STATIC_BIN := target/$(MUSL_TARGET)/release/sshh
-VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml 2>/dev/null | head -n 1)
-DIST_NAME := sshh-$(VERSION)-$(MUSL_TARGET)
+# No version in the name, so .../releases/latest/download/<name> always works.
+DIST_NAME := sshh-$(MUSL_TARGET)
 
 .PHONY: all build static install install-static install-files uninstall dist man lint-man test
 
@@ -44,13 +45,14 @@ install-files:
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/sshh $(DESTDIR)$(MANDIR)/man1/sshh.1
 
-# Release tarball with the static binary: dist/sshh-<version>-<target>.tar.gz
-# (+ .sha256). Unpack it and copy `sshh` to your PATH and `sshh.1` to man1.
+# Release tarball with the static binary: dist/sshh-<target>.tar.gz (+ .sha256).
+# Unpack it and copy `sshh` to your PATH and `sshh.1` to man1 (install.sh does it).
 dist: static
 	rm -rf dist/$(DIST_NAME)
 	install -Dm755 $(STATIC_BIN) dist/$(DIST_NAME)/sshh
 	install -Dm644 man/sshh.1 dist/$(DIST_NAME)/sshh.1
 	install -Dm644 README.md dist/$(DIST_NAME)/README.md
+	install -Dm644 LICENSE-MIT LICENSE-APACHE -t dist/$(DIST_NAME)
 	tar -C dist -czf dist/$(DIST_NAME).tar.gz $(DIST_NAME)
 	cd dist && sha256sum $(DIST_NAME).tar.gz > $(DIST_NAME).tar.gz.sha256
 	rm -rf dist/$(DIST_NAME)

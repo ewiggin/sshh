@@ -65,10 +65,16 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Static build: `make static` / `make install-static` / `make dist` (musl target
   `x86_64-unknown-linux-musl`, needs `musl-gcc` for bundled SQLite; tests also pass with
   `cargo test --target x86_64-unknown-linux-musl`). Release profile has `strip = true`.
+- CI (`.github/workflows/ci.yml`): tests, clippy `-D warnings`, `make lint-man`, shellcheck of
+  install.sh, static build. Release (`release.yml`): on tag `vX.Y.Z` (must match Cargo.toml),
+  builds `make dist` for x86_64 and aarch64 musl and publishes `sshh-<target>.tar.gz` + `.sha256`
+  (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
 - Install: `make && make install` (PREFIX defaults to `~/.local`; `install` never builds), or
-  `install.sh` (POSIX sh, used as `curl … | sh`): checks requirements, clones to a temp dir (or uses
-  the clone it runs from), runs `make build` and `make install`, using sudo only for the copy.
-  Test it with `SSHH_REPO=file://… SSHH_PREFIX=<tmp>`; keep it `sh`/dash compatible.
+  `install.sh` (POSIX sh, used as `curl … | sh`): downloads the release tarball for Linux
+  x86_64/aarch64 and checks its sha256; falls back to building from source (clone + make), and
+  always builds when run from a clone or with `SSHH_FROM_SOURCE`/`SSHH_REF`. Uses sudo only for the
+  copy. Test with `SSHH_RELEASES=http://127.0.0.1:<port>` (python http.server serving
+  `latest/download/<asset>`), `SSHH_REPO=file://…`, `SSHH_PREFIX=<tmp>`; keep it sh/dash compatible.
 - Manual tests without connecting: `SSHH_DB=/tmp/x.db SSHH_SSH=<script printing its args> sshh ...`.
   Set these per command; don't `export` them in the user's shell.
 - `SSHH_DEBUG=1` prints to stderr how the destination is resolved and the command that runs.

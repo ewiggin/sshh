@@ -1,5 +1,9 @@
 # sshh
 
+[![CI](https://github.com/ewiggin/sshh/actions/workflows/ci.yml/badge.svg)](https://github.com/ewiggin/sshh/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ewiggin/sshh)](https://github.com/ewiggin/sshh/releases)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+
 SSH connection manager for the terminal, written in Rust.
 
 - Use it **just like `ssh`**: `sshh user@host`, `sshh -p 2222 -J bastion web`, etc.
@@ -30,30 +34,35 @@ SSH connection manager for the terminal, written in Rust.
 - [Environment variables](#environment-variables)
 - [Development](#development)
 - [Roadmap](#roadmap)
+- [License](#license)
 
 ## Installation
 
-Requirements: Rust ≥ 1.88 (2024 edition), git, make and OpenSSH. SQLite is bundled into the
-binary.
-
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | sh
 ```
 
-The script checks the requirements, builds sshh from source in a temporary directory and installs
-the binary and the man page for your user, in `~/.local/bin/sshh` and
-`~/.local/share/man/man1/sshh.1` (no sudo needed), so `man sshh` works. It warns you if
+On Linux x86_64 and aarch64 the script downloads the **static binary** of the latest
+[release](https://github.com/ewiggin/sshh/releases), checks its SHA-256 and installs it with the man
+page for your user, in `~/.local/bin/sshh` and `~/.local/share/man/man1/sshh.1` (no sudo needed),
+so `man sshh` works. It only needs `curl` (or `wget`) and OpenSSH. On other systems, or if the
+download fails, it builds sshh from source, which needs Rust ≥ 1.88, git and make. It warns you if
 `~/.local/bin` is not in your `PATH`. Run it again to update.
 
 | Variable / option | Effect |
 |---|---|
 | `SSHH_PREFIX=/usr/local` | install somewhere else (uses `sudo` only for the final copy if needed; as root the default is `/usr/local`) |
-| `SSHH_REF=v0.1.0` | install a branch or tag instead of `master` |
+| `SSHH_VERSION=v0.1.0` | install that release instead of the latest |
+| `SSHH_FROM_SOURCE=1` | always build from source |
+| `SSHH_REF=main` | build that branch or tag from source |
 | `sh -s -- --uninstall` | remove the binary and the man page (your connections are kept) |
 
+You can also download the tarball for your architecture from the releases page: it contains the
+static binary, the man page and the licenses.
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/master/install.sh | SSHH_PREFIX=/usr/local sh
-curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/master/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | SSHH_PREFIX=/usr/local sh
+curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | sh -s -- --uninstall
 ```
 
 ### From a clone
@@ -591,3 +600,25 @@ tmux capture-pane -p -t t
 Pending ideas: "don't ask again" for a destination in the wizard, `sshh add` without arguments
 opening the form, configurable shortcuts, keeping sessions alive after quitting (a background
 server, like tmux), mouse forwarding to remote programs.
+
+### Releasing
+
+1. Bump `version` in `Cargo.toml` (and `Cargo.lock` with `cargo build`), update the version in
+   `man/sshh.1`, and commit.
+2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+
+The release workflow checks that the tag matches `Cargo.toml`, runs the tests and publishes static
+binaries for x86_64 and aarch64 Linux with their SHA-256 checksums.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without
+any additional terms or conditions.
