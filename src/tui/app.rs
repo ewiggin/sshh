@@ -423,7 +423,7 @@ impl App {
         self.rows_area.height.max(1) as isize
     }
 
-    /// Enter: shows the selected connection in the active column.
+    /// Space: shows the selected connection in the active column.
     fn connect_selected(&mut self) {
         self.open_in_column(false);
     }
@@ -571,7 +571,7 @@ impl App {
         };
         match (self.sessions.get(&id), key.code) {
             (Some(SessionState::Alive), _) => self.request = Some(Request::Input(id, key)),
-            (_, KeyCode::Enter) => {
+            (_, KeyCode::Enter | KeyCode::Char(' ')) => {
                 if let Some(host) = self.host(id) {
                     self.request = Some(Request::OpenSession(Box::new(host.clone())));
                 }
@@ -677,7 +677,8 @@ impl App {
                 self.query.clear();
                 self.query_changed();
             }
-            KeyCode::Enter => self.connect_selected(),
+            KeyCode::Char(' ') => self.connect_selected(),
+            KeyCode::Enter => self.edit_selected(form::ALIAS),
             KeyCode::Char('/') => self.mode = Mode::Search,
             KeyCode::Char('?') => self.mode = Mode::Help,
             KeyCode::Tab => self.cycle_focus(true),
@@ -792,8 +793,8 @@ impl App {
 
     fn on_search_key(&mut self, key: KeyEvent, ctrl: bool) {
         match key.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
-            KeyCode::Enter => self.connect_selected(),
+            // The list is filtered while typing; Enter / Esc go back to it.
+            KeyCode::Esc | KeyCode::Enter => self.mode = Mode::Normal,
             KeyCode::Down => self.move_by(1),
             KeyCode::Up => self.move_by(-1),
             KeyCode::Char('n' | 'j') if ctrl => self.move_by(1),
@@ -1002,11 +1003,19 @@ mod tests {
     }
 
     #[test]
-    fn search_ctrl_jk_and_enter_connects() {
+    fn search_filters_while_typing_and_space_connects() {
         let mut app = app();
         type_query(&mut app, "#prod");
+        assert_eq!(aliases(&app), ["web1", "db1"]);
+        // In the search box Space is part of the query.
+        app.on_key(ch(' '));
+        assert_eq!(app.query, "#prod ");
         app.on_key(ctrl('j'));
         app.on_key(key(KeyCode::Enter));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.query, "#prod ");
+        assert_eq!(app.request, None);
+        app.on_key(ch(' '));
         assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.data.alias == "db1"));
         assert_eq!(app.focus, Focus::Terminal);
     }
@@ -1060,7 +1069,7 @@ mod tests {
     /// Columns [db1, dev] with the second one active.
     fn app_with_two_columns() -> App {
         let mut app = app_with_sessions();
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         app.on_key(alt('h'));
         app.on_key(ch('j'));
         app.on_key(alt('v'));
@@ -1069,14 +1078,14 @@ mod tests {
     }
 
     #[test]
-    fn enter_shows_the_selection_in_the_active_column() {
+    fn space_shows_the_selection_in_the_active_column() {
         let mut app = app_with_sessions();
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         // db1's session is alive: shown without reopening it.
         assert_eq!((columns(&app), app.focus, &app.request), (vec!["db1"], Focus::Terminal, &None));
         app.on_key(alt('h'));
         app.on_key(ch('k'));
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         assert_eq!(columns(&app), ["web1"]);
         assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 1));
     }
@@ -1110,7 +1119,7 @@ mod tests {
     #[test]
     fn terminal_focus_sends_keys_to_the_active_column() {
         let mut app = app_with_sessions();
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         for k in [ch('q'), ctrl('c'), key(KeyCode::Esc), ch('/'), key(KeyCode::Tab)] {
             app.on_key(k);
             assert_eq!(app.request.take(), Some(Request::Input(2, k)));
@@ -1130,7 +1139,7 @@ mod tests {
     #[test]
     fn alt_j_k_switch_the_session_of_the_column() {
         let mut app = app_with_sessions();
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         app.on_key(alt('j'));
         assert_eq!(columns(&app), ["dev"]);
         app.on_key(alt('k'));
@@ -1217,18 +1226,21 @@ mod tests {
     fn ended_session_reconnects_on_enter() {
         let mut app = app_with_sessions();
         app.on_key(ch('j'));
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         app.request = None;
         app.on_key(ch('a'));
         assert_eq!(app.request, None);
         app.on_key(key(KeyCode::Enter));
+        assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 3));
+        app.request = None;
+        app.on_key(ch(' '));
         assert!(matches!(&app.request, Some(Request::OpenSession(h)) if h.id == 3));
     }
 
     #[test]
     fn closing_and_quitting_ask_when_sessions_are_alive() {
         let mut app = app_with_sessions();
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         app.on_key(alt('h'));
         app.on_key(ch('x'));
         assert!(matches!(&app.mode, Mode::ConfirmClose { id: 2, .. }));
@@ -1264,6 +1276,15 @@ mod tests {
         app.on_key(ch('y'));
         app.on_key(ch('y'));
         assert!(matches!(app.request, Some(Request::Copy(ref d)) if d.alias == "web1"));
+    }
+
+    #[test]
+    fn enter_and_e_edit_the_selection() {
+        for k in [key(KeyCode::Enter), ch('e')] {
+            let mut app = app();
+            app.on_key(k);
+            assert!(matches!(&app.mode, Mode::Form(f) if f.kind == FormKind::Edit(1)));
+        }
     }
 
     #[test]
@@ -1343,7 +1364,7 @@ mod tests {
 
         // With a column the terminal joins the cycle; inside it Tab goes to ssh.
         let mut app = app_with_sessions();
-        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch(' '));
         app.on_key(alt('h'));
         app.on_key(key(KeyCode::BackTab));
         assert_eq!(app.focus, Focus::Terminal);

@@ -162,7 +162,7 @@ closes them, after asking.
 .SS Columns
 These keys work from anywhere, also while typing in a session.
 .TP
-.B Enter
+.B Space
 (in the list) Show the selected connection in the active column, opening
 its session.
 If it is already in a column, focus that column; if its session ended,
@@ -212,6 +212,8 @@ don't reach the remote shell; use
 there to move by words.
 When a session has ended,
 .B Enter
+or
+.B Space
 reconnects and
 .B Esc
 goes back to the list.
@@ -238,9 +240,8 @@ The search is fuzzy over alias, name, user, host, description and tags;
 words starting with
 .B #
 filter by tag (prefix match).
+The list is filtered while typing.
 While searching,
-.B Enter
-connects,
 .BR Up / Down ,
 .BR Ctrl\-j / Ctrl\-k
 and
@@ -249,14 +250,16 @@ move,
 .B Ctrl\-w
 deletes a word,
 .B Ctrl\-u
-clears it and
+clears it, and
+.B Enter
+or
 .B Esc
-goes back to the list keeping the filter.
+go back to the list keeping the filter.
 .TP
 .B a
 Add a connection.
 .TP
-.BR e ", " t
+.BR Enter ", " e ", " t
 Edit the selected connection, or edit its tags.
 .TP
 .B dd

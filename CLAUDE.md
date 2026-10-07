@@ -37,7 +37,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `form.rs` = add/edit/wizard form. `ui.rs` = rendering. `term.rs` = terminal, $EDITOR, external
   programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and
   clipboard (wl-copy/xclip, OSC 52 fallback).
-- Shortcuts: vim/lazygit style (`j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
+- Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
+  edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
+  Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
   `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active column. Columns: `Alt-v` split, `Alt-h/l` or `Alt-←/→` move,
   `Alt-1..9` jump, `Alt-j/k` change the column's session, `Alt-w` close column, `Alt-f`/`Alt-z` full
   screen (zoom), `Alt-H/L` move column. `Alt-f` was the user's choice despite clashing with readline;

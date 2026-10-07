@@ -213,7 +213,7 @@ Terminal columns (these work from anywhere, also while typing in a session):
 
 | Key | Action |
 |---|---|
-| `Enter` (in the list) | show the selected connection in the active column (opens its session; focuses it if it's already in a column; reconnects if it ended) |
+| `Space` (in the list) | show the selected connection in the active column (opens its session; focuses it if it's already in a column; reconnects if it ended) |
 | `Alt-v` | show the selected connection in a **new column** right of the active one (split) |
 | `Alt-←` / `Alt-→` (or `Alt-h` / `Alt-l`) | column left / right; the list is the leftmost column |
 | `Alt-1` … `Alt-9` | jump to column N |
@@ -238,7 +238,7 @@ List and general keys:
 | `Tab` / `Shift-Tab` | next / previous pane: list → details → active column (if any; inside it `Tab` goes to ssh, leave with `Alt-h`) |
 | `/` | search |
 | `a` | add a connection |
-| `e` | edit |
+| `Enter`, `e` | edit |
 | `t` | edit tags |
 | `dd` | delete (asks for confirmation with `y`) |
 | `yy` | copy the equivalent `ssh` command to the clipboard |
@@ -254,25 +254,25 @@ While a **terminal column has focus, every key goes to its ssh session** (includ
 `q`, `Tab` and `Ctrl-w`), except the `Alt` shortcuts above. Note that `Alt-f` (readline: forward a
 word) and `Alt-←`/`Alt-→` (word movement in zsh/fish) are taken by `sshh`; use `Ctrl-←`/`Ctrl-→`
 in the shell instead. Other readline keys (`Alt-.`, `Alt-b`, `Alt-d`…) still reach the shell. When a session has ended,
-`Enter` reconnects and `Esc` goes back to the list.
+`Enter` or `Space` reconnects and `Esc` goes back to the list.
 
 ### Search
 
-`/` starts a **fuzzy** search over alias, name, user, host, description and tags. Matching letters
-are highlighted.
+`/` starts a **fuzzy** search over alias, name, user, host, description and tags. The list is
+filtered while you type and matching letters are highlighted.
 
 - `#tag` filters by tag (prefix match): `#prod`, `#prod web`, `#prod #db`.
-- `Enter` connects to the selected result (like fzf).
 - `↑` / `↓`, `Ctrl-j` / `Ctrl-k` or `Ctrl-n` / `Ctrl-p` move without leaving the search.
 - `Ctrl-w` deletes a word; `Ctrl-u` deletes everything.
-- `Esc` goes back to the list keeping the filter; a second `Esc` clears it.
+- `Enter` or `Esc` go back to the list keeping the filter (then `Space` connects); a second `Esc`
+  clears it.
 
 ### Mouse
 
 | Action | Effect |
 |---|---|
 | Click on a row | select |
-| Double click | open the session |
+| Double click | open the session (like `Space`) |
 | Click on a column | focus it |
 | Wheel | move · scroll the details · scroll back the history of the column under the pointer |
 | Click on the search box | search |

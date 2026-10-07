@@ -244,8 +244,8 @@ fn draw_overview(frame: &mut Frame, app: &App, sessions: &HashMap<i64, Session>,
         return;
     };
     let title = match sessions.get(&host.id).map(|s| s.exit().is_none()) {
-        Some(true) => format!("{} — session running · Enter shows it", host.data.alias),
-        Some(false) => format!("{} — session ended · Enter reconnects", host.data.alias),
+        Some(true) => format!("{} — session running · Space shows it", host.data.alias),
+        Some(false) => format!("{} — session ended · Space reconnects", host.data.alias),
         None => format!("{} — not connected", host.data.alias),
     };
     frame.render_widget(overview(app, host).block(block(&title, false)), area);
@@ -306,11 +306,12 @@ fn overview<'a>(app: &App, host: &'a Host) -> Paragraph<'a> {
         Line::default(),
         Line::from(vec!["  ".into(), host.data.target().bold()]),
         Line::default(),
-        key("Enter", "open a session here"),
+        key("Space", "open a session here"),
+        key("Alt-v", "open it in a new column"),
         key("f", "full-screen ssh"),
         key("s", "sftp"),
         key("c", "install your public key (ssh-copy-id)"),
-        key("e", "edit"),
+        key("Enter", "edit (also e)"),
     ];
     if !app.history.is_empty() {
         lines.push(Line::default());
@@ -334,7 +335,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     }
     let active = app.active_host_id().and_then(|id| app.sessions.get(&id).copied());
     let keys: &[(&str, &str)] = match (&app.mode, app.focus, active) {
-        (Mode::Search, ..) => &[("Enter", "connect"), ("↑↓ Ctrl-j/k", "move"), ("Esc", "done searching")],
+        (Mode::Search, ..) => &[("", "type to filter"), ("↑↓ Ctrl-j/k", "move"), ("Enter/Esc", "back to list")],
         (_, Focus::Terminal, Some(SessionState::Alive)) => &[
             ("Alt-←/→", "column"),
             ("Alt-1..9", "jump"),
@@ -349,12 +350,12 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         }
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
         _ => &[
-            ("Enter", "connect"),
+            ("Space", "connect"),
             ("Alt-v", "new column"),
             ("Alt-l", "columns"),
             ("/", "search"),
             ("a", "add"),
-            ("e", "edit"),
+            ("Enter/e", "edit"),
             ("x", "close session"),
             ("f", "full screen"),
             ("?", "help"),
@@ -396,7 +397,7 @@ fn draw_confirm(frame: &mut Frame, question: Vec<Span<'_>>, action: &str) {
 
 fn draw_help(frame: &mut Frame) {
     const HELP: &[(&str, &str)] = &[
-        ("Enter", "show the connection in the active column"),
+        ("Space", "show the connection in the active column"),
         ("Alt-v", "show it in a new column (split)"),
         ("Alt-←/→ Alt-h/l", "column left / right (the list is the first)"),
         ("Alt-1 … Alt-9", "jump to column N"),
@@ -412,11 +413,11 @@ fn draw_help(frame: &mut Frame) {
         ("Ctrl-d/u", "half page down / up"),
         ("Ctrl-f/b", "page down / up"),
         ("Tab / S-Tab", "next / previous pane (list, details, terminal)"),
-        ("/", "search (fuzzy); #tag filters by tag"),
+        ("/", "search (filters while typing; #tag by tag)"),
         ("Esc", "back / clear search"),
         ("", ""),
         ("a", "add connection"),
-        ("e / t", "edit / edit tags"),
+        ("Enter / e, t", "edit / edit tags"),
         ("dd", "delete (asks for confirmation)"),
         ("yy", "copy the ssh command"),
         ("s / c", "sftp / install your public key (ssh-copy-id)"),
