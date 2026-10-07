@@ -76,6 +76,25 @@ make man                                         # preview the man page without 
 
 `make install` doesn't compile, so `sudo make install` never runs cargo as root.
 
+### Static binary (musl)
+
+A fully static build runs on any x86_64 Linux, whatever its glibc version, with no dependencies
+(SQLite is bundled):
+
+```sh
+make static && make install-static     # build and install it
+make dist                              # dist/sshh-<version>-x86_64-unknown-linux-musl.tar.gz (+ .sha256)
+```
+
+The tarball contains `sshh`, `sshh.1` and this README, ready to attach to a release or copy to another
+machine. Building it needs the musl Rust target and `musl-gcc`:
+
+| System | Packages |
+|---|---|
+| rustup | `rustup target add x86_64-unknown-linux-musl` (+ `musl-gcc` from your distribution) |
+| Arch | `rust-musl` and `musl` |
+| Debian / Ubuntu | `musl-tools` (+ the rustup target) |
+
 Binary only, without the man page and without cloning (installs to `~/.cargo/bin`):
 
 ```sh
