@@ -74,7 +74,7 @@ uninstall() {
 
 # Prints the directory of the clone this script runs from, if any.
 clone_dir() {
-    here=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
+    here=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || here=""
     if [ -n "$here" ] && [ -f "$here/Cargo.toml" ] && grep -q '^name = "sshh"' "$here/Cargo.toml"; then
         echo "$here"
     fi

@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check that the tag matches Cargo.toml
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
@@ -45,7 +45,7 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CC_aarch64_unknown_linux_musl: musl-gcc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: dist/*
@@ -54,11 +54,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
