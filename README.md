@@ -104,10 +104,12 @@ machine. Building it needs the musl Rust target and `musl-gcc`:
 | Arch | `rust-musl` and `musl` |
 | Debian / Ubuntu | `musl-tools` (+ the rustup target) |
 
-Binary only, without the man page and without cloning (installs to `~/.cargo/bin`):
+Binary only, without the man page and without cloning (installs `sshh` to `~/.cargo/bin`; the
+crate is called `sshh-tui` because `sshh` was taken on crates.io):
 
 ```sh
-cargo install --git https://github.com/ewiggin/sshh.git
+cargo install sshh-tui     # or `cargo binstall sshh-tui` to download the release binary
+cargo install --git https://github.com/ewiggin/sshh.git     # latest unreleased code
 ```
 
 Optionally, to always use it instead of `ssh`:

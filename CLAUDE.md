@@ -79,6 +79,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
 - Versions: `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh + GNU sed) updates
   Cargo.toml, Cargo.lock and the man page `.TH` line and commits "bump to vX.Y.Z"; then tag + push.
+- crates.io: the package is `sshh-tui` (`sshh` is taken) with `[[bin]] name = "sshh"`;
+  `[package.metadata.binstall]` points to the release tarballs (keep it in sync with their names).
+  `cargo publish` after pushing the release tag; `exclude` keeps CI/scripts out of the crate.
 - Install: `make && make install` (PREFIX defaults to `~/.local`; `install` never builds), or
   `install.sh` (POSIX sh, used as `curl … | sh`): downloads the release tarball for Linux
   x86_64/aarch64 and checks its sha256; falls back to building from source (clone + make), and

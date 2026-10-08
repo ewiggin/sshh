@@ -1,5 +1,6 @@
 [package]
-name = "sshh"
+# The crate name `sshh` is taken on crates.io; the binary is still `sshh`.
+name = "sshh-tui"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
@@ -10,6 +11,18 @@ repository = "https://github.com/ewiggin/sshh"
 readme = "README.md"
 keywords = ["ssh", "tui", "terminal", "connection-manager", "cli"]
 categories = ["command-line-utilities"]
+exclude = ["/.github", "/scripts", "/install.sh", "/CLAUDE.md", "/dist"]
+
+[[bin]]
+name = "sshh"
+path = "src/main.rs"
+
+# `cargo binstall sshh-tui` downloads the release tarball instead of building
+# (on linux-gnu it also tries the musl targets, which are the ones published).
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/sshh-{ target }.tar.gz"
+bin-dir = "sshh-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
 
 [dependencies]
 anyhow = "1.0.104"
