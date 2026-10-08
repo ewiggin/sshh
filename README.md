@@ -108,8 +108,8 @@ Binary only, without the man page and without cloning (installs `sshh` to `~/.ca
 crate is called `sshh-tui` because `sshh` was taken on crates.io):
 
 ```sh
-cargo install sshh-tui     # or `cargo binstall sshh-tui` to download the release binary
-cargo install --git https://github.com/ewiggin/sshh.git     # latest unreleased code
+cargo install --locked sshh-tui     # or `cargo binstall sshh-tui` to download the release binary
+cargo install --locked --git https://github.com/ewiggin/sshh.git     # latest unreleased code
 ```
 
 Optionally, to always use it instead of `ssh`:
