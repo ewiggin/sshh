@@ -216,6 +216,15 @@ The session keeps running.
 Toggle full screen for the active pane, inside
 .BR sshh .
 .TP
+.B Alt\-a
+Toggle broadcast: what is typed or pasted in the active pane also goes to
+every other visible pane with a live session of the same kind.
+Those panes get a red border and
+.B BROADCAST
+in their title, and the footer shows a badge.
+Sessions without a pane, ended ones and panes in history mode are left out.
+It stops by itself when the last pane is closed.
+.TP
 .B Alt\-s
 History mode for the active pane: move with
 .BR j / k ,

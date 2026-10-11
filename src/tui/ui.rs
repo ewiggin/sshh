@@ -26,6 +26,7 @@ pub const ACCENT: Color = Color::Blue;
 const MATCH: Color = Color::Yellow;
 const TAG: Color = Color::Magenta;
 const CONNECTED: Color = Color::Green;
+const BROADCAST: Color = Color::Red;
 
 pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Session>) {
     let [main, footer] =
@@ -501,10 +502,22 @@ fn draw_pane(
     if app.zoomed {
         title.push_str(" · full screen (Alt-f)");
     }
+    // Broadcast: mark every pane that gets what is typed in the active one.
+    let receiving = app.broadcast
+        && copy.is_none()
+        && session.exit().is_none()
+        && app.active_key().is_some_and(|active| app.input_targets(active).contains(&key));
+    if receiving {
+        title.push_str(" · BROADCAST");
+    }
     let mut block = block(&title, focused);
     if session.exit().is_none() {
         let style = Style::new().fg(CONNECTED);
         block = block.title_style(if focused { style.bold() } else { style });
+    }
+    if receiving {
+        let style = Style::new().fg(BROADCAST);
+        block = block.border_style(if focused { style.bold() } else { style });
     }
     let show_cursor = focused
         && copy.is_none()
@@ -563,7 +576,15 @@ fn history_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
-fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
+    if app.broadcast {
+        // Always visible, even over a status message.
+        let badge = " BROADCAST · Alt-a stops ";
+        let [left, rest] =
+            Layout::horizontal([Constraint::Length(badge.chars().count() as u16), Constraint::Fill(1)]).areas(area);
+        frame.render_widget(Line::from(badge.fg(BROADCAST).bold().reversed()), left);
+        area = rest;
+    }
     if let Some(status) = &app.status {
         let color = if status.error { Color::Red } else { Color::Green };
         frame.render_widget(Line::from(format!(" {}", status.text)).fg(color), area);
@@ -591,6 +612,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             ("Alt-w", "close"),
             ("Alt-f", "full screen"),
             ("Alt-s", "history"),
+            ("Alt-a", "broadcast"),
             ("Alt-n/p", "session"),
             ("", "other keys go to ssh"),
         ],
@@ -667,6 +689,7 @@ fn draw_help(frame: &mut Frame) {
         ("Alt-w", "close the pane (the session keeps running)"),
         ("Alt-f / Alt-z", "full screen for the active pane (toggle)"),
         ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
+        ("Alt-a", "broadcast: type in every visible pane (toggle)"),
         ("x", "close the connection's sessions (ssh and sftp)"),
         ("f", "full-screen ssh (back to sshh on exit)"),
         ("", ""),

@@ -55,7 +55,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active pane. Panes: `Alt-v` new column, `Alt--` new pane
   below the last column, `Alt-h/j/k/l` (+ arrows) focus like vim, `Alt-1..9` jump to column,
   `Alt-J` stack below the right (or left) column, `Alt-K` unstack, `Alt-H/L` move column, `Alt-n/p`
-  change the pane's session, `Alt-w` close pane, `Alt-f`/`Alt-z` full screen (zoom). `Alt-f` was the user's choice despite clashing with readline;
+  change the pane's session, `Alt-w` close pane, `Alt-f`/`Alt-z` full screen (zoom), `Alt-a` broadcast (`App::broadcast`:
+  `Input`/`Paste` fan out to `App::input_targets`, the visible live panes of the same kind). `Alt-f` was the user's choice despite clashing with readline;
   avoid taking more readline Alt keys (`Alt-.`, `b`, `d`, `<`, `>`).
   With the terminal focused every other key goes to ssh. `Esc` always goes back one level (except in
   the terminal); only `q`/`Ctrl-c` quit (confirming if sessions are alive).

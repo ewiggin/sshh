@@ -239,6 +239,8 @@ pub struct App {
     pub active_row: usize,
     /// The active column takes the whole screen.
     pub zoomed: bool,
+    /// Keys typed in a pane also go to the other visible panes (Alt-a).
+    pub broadcast: bool,
     /// Areas from the last render (for the mouse and to size sessions).
     pub rows_area: Rect,
     pub search_area: Rect,
@@ -279,6 +281,7 @@ impl App {
             active_column: 0,
             active_row: 0,
             zoomed: false,
+            broadcast: false,
             rows_area: Rect::default(),
             search_area: Rect::default(),
             detail_area: Rect::default(),
@@ -320,6 +323,22 @@ impl App {
     /// Session shown in the active pane.
     pub fn active_key(&self) -> Option<SessionKey> {
         self.columns.get(self.active_column)?.get(self.active_row).copied()
+    }
+
+    /// Sessions that get what is typed in the pane of `key`: only that one,
+    /// or with broadcast on, also every other visible pane with a live session
+    /// of the same kind (not in history mode).
+    pub fn input_targets(&self, key: SessionKey) -> Vec<SessionKey> {
+        let mut targets = vec![key];
+        if self.broadcast && !self.zoomed {
+            targets.extend(self.columns.iter().flatten().copied().filter(|k| {
+                *k != key
+                    && k.kind == key.kind
+                    && self.sessions.get(k) == Some(&SessionState::Alive)
+                    && !self.history_sessions.contains(k)
+            }));
+        }
+        targets
     }
 
     /// Pane showing session `key`, if any.
@@ -386,6 +405,7 @@ impl App {
             self.active_column = 0;
             self.active_row = 0;
             self.zoomed = false;
+            self.broadcast = false;
             if self.focus == Focus::Terminal {
                 self.focus = Focus::List;
             }
@@ -869,6 +889,16 @@ impl App {
                 }
             }
             KeyCode::Char('f' | 'z') => {}
+            // Broadcast: what is typed in a pane goes to every visible one.
+            KeyCode::Char('a') if self.broadcast => {
+                self.broadcast = false;
+                self.info("Broadcast off");
+            }
+            KeyCode::Char('a') if self.columns.is_empty() => self.error("Broadcast needs an open pane"),
+            KeyCode::Char('a') => {
+                self.broadcast = true;
+                self.info("Broadcast on: keys go to every visible pane (Alt-a stops it)");
+            }
             // With Shift, move: H/L the column, J stacks the pane, K unstacks it.
             KeyCode::Char('H') if in_terminal && column > 0 => {
                 self.columns.swap(column, column - 1);
@@ -1673,6 +1703,47 @@ mod tests {
         assert_eq!(app.outcome, None);
         app.on_paste("ls\n");
         assert_eq!(app.request.take(), Some(Request::Paste(SessionKey::ssh(2), "ls\n".into())));
+    }
+
+    #[test]
+    fn alt_a_broadcasts_input_to_the_visible_panes() {
+        let mut app = app_with_two_columns();
+        app.sessions.insert(SessionKey::ssh(3), SessionState::Alive);
+        let (db1, dev) = (SessionKey::ssh(2), SessionKey::ssh(3));
+        assert_eq!(app.input_targets(dev), [dev]);
+        app.on_key(alt('a'));
+        assert!(app.broadcast && app.request.is_none());
+        // The key still targets the active pane; the loop fans it out.
+        app.on_key(ch('x'));
+        assert_eq!(app.request.take(), Some(Request::Input(dev, ch('x'))));
+        assert_eq!(app.input_targets(dev), [dev, db1]);
+        // Ended sessions, history mode and other kinds are left out.
+        app.history_sessions.insert(db1);
+        assert_eq!(app.input_targets(dev), [dev]);
+        app.history_sessions.clear();
+        assert_eq!(app.input_targets(SessionKey::sftp(3)), [SessionKey::sftp(3)]);
+        app.sessions.insert(db1, SessionState::Ended);
+        assert_eq!(app.input_targets(dev), [dev]);
+        app.sessions.insert(db1, SessionState::Alive);
+        // Full screen shows a single pane.
+        app.on_key(alt('f'));
+        assert_eq!(app.input_targets(dev), [dev]);
+        app.on_key(alt('f'));
+        app.on_key(alt('a'));
+        assert!(!app.broadcast);
+        assert_eq!(app.input_targets(dev), [dev]);
+    }
+
+    #[test]
+    fn broadcast_needs_panes_and_stops_without_them() {
+        let mut app = app_with_sessions();
+        app.on_key(alt('a'));
+        assert!(!app.broadcast && app.status.as_ref().is_some_and(|s| s.error));
+        app.on_key(ch(' '));
+        app.on_key(alt('a'));
+        assert!(app.broadcast);
+        app.on_key(alt('w'));
+        assert!(app.columns.is_empty() && !app.broadcast);
     }
 
     #[test]

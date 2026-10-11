@@ -261,10 +261,17 @@ can hold several panes stacked vertically, like tmux or vim splits:
 | `Alt-w` | close the pane; its neighbours take the space (the session keeps running) |
 | `Alt-f` (or `Alt-z`) | full screen: the active pane takes the whole screen, inside `sshh` (again to go back) |
 | `Alt-s` | history mode for the active pane (see below) |
+| `Alt-a` | broadcast: what you type (or paste) in the active pane also goes to every other visible pane (again to stop) |
 
 Columns share the width equally and need at least 40 characters each (up to 9 columns); panes in a
 column share its height and need at least 6 lines each. Pane titles show their position (`2` for a
 column with one pane, `1.1`, `1.2`… for stacked ones). A session is shown in at most one pane.
+
+While **broadcast** is on, the panes that receive the input have a red border and `BROADCAST` in
+their title, and the footer shows a `BROADCAST` badge. Only visible panes with a live session of the
+same kind as the active one (ssh or sftp) take part: sessions without a pane, ended ones, panes in
+history mode and, in full screen, every pane but the active one are left out. It is always off when
+`sshh` starts and stops by itself when the last pane is closed.
 
 List and general keys:
 

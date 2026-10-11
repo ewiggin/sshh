@@ -98,8 +98,11 @@ fn sync_sessions(sessions: &mut Sessions, app: &mut App) {
         .iter()
         .map(|(id, s)| (*id, if s.exit().is_none() { SessionState::Alive } else { SessionState::Ended }))
         .collect();
-    if app.focus == Focus::Terminal && app.columns.is_empty() {
-        app.focus = Focus::List;
+    if app.columns.is_empty() {
+        app.broadcast = false;
+        if app.focus == Focus::Terminal {
+            app.focus = Focus::List;
+        }
     }
 }
 
@@ -276,13 +279,17 @@ fn handle_request(
             }
         }
         Request::Input(id, key) => {
-            if let Some(session) = sessions.get_mut(&id) {
-                session.send_key(key);
+            for id in app.input_targets(id) {
+                if let Some(session) = sessions.get_mut(&id) {
+                    session.send_key(key);
+                }
             }
         }
         Request::Paste(id, text) => {
-            if let Some(session) = sessions.get_mut(&id) {
-                session.paste(&text);
+            for id in app.input_targets(id) {
+                if let Some(session) = sessions.get_mut(&id) {
+                    session.paste(&text);
+                }
             }
         }
         Request::StartHistory(id) => {
