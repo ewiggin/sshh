@@ -286,6 +286,7 @@ List and general keys:
 | `Tab` / `Shift-Tab` | next / previous pane: list → details → active column (if any; inside it `Tab` goes to ssh, leave with `Alt-h`) |
 | `/` | search |
 | `[` / `]` | switch tab: Connections / Tags (in Tags, `Space` or `Enter` filters by the tag, `Esc` goes back) |
+| `Alt-v` (on a tag, in Tags) | open every connection of the tag in panes, replacing the current ones (their sessions keep running); as many columns as fit, the rest stacked. Then `Alt-a` types in all of them |
 | `a` | add a connection |
 | `Enter`, `e` | edit |
 | `t` | edit tags |

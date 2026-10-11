@@ -84,6 +84,8 @@ pub enum Request {
     Reload,
     /// Open (or reopen, if it ended) an embedded session of a connection.
     OpenSession(Box<Host>, SessionKind),
+    /// Open an ssh session of each of these connections.
+    OpenSessions(Vec<Host>),
     /// Close every session of a connection.
     CloseSessions(i64),
     /// Input for an embedded session.
@@ -730,6 +732,40 @@ impl App {
         self.focus_pane(last, self.columns[last].len() - 1);
     }
 
+    /// Alt-v in the Tags tab: replaces the panes with one per connection of the
+    /// highlighted tag, in a grid, opening the sessions that aren't alive. The
+    /// sessions of the panes it replaces keep running.
+    fn open_tag(&mut self) {
+        let Some(tag) = self.selected_tag().map(|t| t.name.clone()) else { return };
+        let mut hosts: Vec<Host> = self.hosts.iter().filter(|h| h.data.tags.contains(&tag)).cloned().collect();
+        let total = hosts.len();
+        let max_columns = self.max_columns();
+        hosts.truncate(max_columns * self.max_panes_per_column());
+        if hosts.is_empty() {
+            return;
+        }
+        // As many columns as fit; the rest is stacked, evenly.
+        let count = hosts.len().min(max_columns);
+        let mut keys = hosts.iter().map(|h| SessionKey::ssh(h.id));
+        self.columns = (0..count)
+            .map(|c| {
+                let panes = hosts.len() / count + usize::from(c < hosts.len() % count);
+                keys.by_ref().take(panes).collect()
+            })
+            .collect();
+        self.zoomed = false;
+        self.focus_pane(0, 0);
+        if hosts.len() < total {
+            self.error(format!("'#{tag}' has {total} connections: only {} fit in the panes", hosts.len()));
+        } else {
+            self.info(format!("'#{tag}': {total} connection(s) open (Alt-a types in all of them)"));
+        }
+        hosts.retain(|h| self.sessions.get(&SessionKey::ssh(h.id)) != Some(&SessionState::Alive));
+        if !hosts.is_empty() {
+            self.request = Some(Request::OpenSessions(hosts));
+        }
+    }
+
     fn already_open(&mut self, host: &Host, kind: SessionKind, (column, row): Pane) {
         let (alias, kind) = (&host.data.alias, kind.label());
         let place = match self.columns[column].len() {
@@ -853,6 +889,8 @@ impl App {
             // The session shown in the active pane.
             KeyCode::Char('n') => self.cycle_column_session(true),
             KeyCode::Char('p') => self.cycle_column_session(false),
+            // In the Tags tab: every connection of the tag, in panes.
+            KeyCode::Char('v') if !in_terminal && self.tab == ListTab::Tags => self.open_tag(),
             // Splits: a column on the right, or a pane below the last column.
             KeyCode::Char('v') => self.open_in_column(SessionKind::Ssh, true),
             KeyCode::Char('-') => self.open_below(),
@@ -1549,6 +1587,44 @@ mod tests {
         // Esc clears the filter as usual.
         app.on_key(key(KeyCode::Esc));
         assert_eq!(aliases(&app).len(), 3);
+    }
+
+    #[test]
+    fn alt_v_on_a_tag_opens_its_connections_in_panes() {
+        let mut app = app_with_two_columns();
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(ch(']'));
+        app.on_key(ch('j'));
+        app.on_key(ch('j'));
+        app.on_key(alt('v'));
+        // The panes are replaced; db1's session is alive, so only web1 opens.
+        assert_eq!(columns(&app), ["web1", "db1"]);
+        assert_eq!((app.focus, app.active_column, app.active_row), (Focus::Terminal, 0, 0));
+        assert!(matches!(&app.request, Some(Request::OpenSessions(h)) if h.len() == 1 && h[0].id == 1));
+        assert!(app.status.as_ref().is_some_and(|s| !s.error));
+    }
+
+    #[test]
+    fn a_tag_is_stacked_or_cut_to_what_fits() {
+        let open = |area| {
+            let mut app = app();
+            app.columns_area = area;
+            app.on_key(ch(']'));
+            app.on_key(ch('j'));
+            app.on_key(ch('j'));
+            app.on_key(alt('v'));
+            app
+        };
+        // One column of two panes.
+        let app = open(Rect::new(0, 0, 60, 12));
+        assert_eq!(columns(&app), ["web1/db1"]);
+        assert!(matches!(&app.request, Some(Request::OpenSessions(h)) if h.len() == 2));
+        // Room for a single pane: the rest isn't opened.
+        let app = open(Rect::new(0, 0, 60, 8));
+        assert_eq!(columns(&app), ["web1"]);
+        assert!(matches!(&app.request, Some(Request::OpenSessions(h)) if h.len() == 1));
+        assert!(app.status.as_ref().is_some_and(|s| s.error));
     }
 
     #[test]

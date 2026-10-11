@@ -49,6 +49,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - List pane tabs (`App::tab`, `ListTab`): Connections and Tags (`[`/`]`, click on the title via
   `App::tab_areas`). Tags tab = `App::tags` (name + count, recomputed in `refilter`); Space/Enter
   sets the query to `#tag` and goes back; connection actions are ignored there (`on_tags_key`).
+  `Alt-v` on a tag (`App::open_tag`) replaces the panes with a grid of the tag's connections and
+  asks for the missing sessions with `Request::OpenSessions`.
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,

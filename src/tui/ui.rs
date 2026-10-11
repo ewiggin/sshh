@@ -622,6 +622,7 @@ fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
         _ if app.tab == ListTab::Tags => &[
             ("Space", "filter by tag"),
+            ("Alt-v", "open all in panes"),
             ("j/k", "move"),
             ("[ ]", "tabs"),
             ("Esc", "connections"),
@@ -700,6 +701,7 @@ fn draw_help(frame: &mut Frame) {
         ("Tab / S-Tab", "next / previous pane (list, details, terminal)"),
         ("/", "search (filters while typing; #tag by tag)"),
         ("[ / ]", "tabs: connections / tags (Space on a tag filters)"),
+        ("Alt-v (on a tag)", "open all its connections in panes"),
         ("Esc", "back / clear search"),
         ("", ""),
         ("a", "add connection"),

@@ -269,6 +269,11 @@ fn handle_request(
             app.info("List reloaded");
         }
         Request::OpenSession(host, kind) => open_session(db, app, sessions, dirty, &host, kind)?,
+        Request::OpenSessions(hosts) => {
+            for host in &hosts {
+                open_session(db, app, sessions, dirty, host, SessionKind::Ssh)?;
+            }
+        }
         Request::CloseSessions(id) => {
             let before = sessions.len();
             sessions.retain(|key, _| key.host != id);
