@@ -1,6 +1,7 @@
-# Installs for the current user by default (no sudo needed).
-#   make && make install
-#   make && sudo make install PREFIX=/usr/local      # system wide
+# Plain `make` lists the targets (`make help`). Installs for the current user
+# by default (no sudo needed).
+#   make build && make install
+#   make build && sudo make install PREFIX=/usr/local  # system wide
 #   make install DESTDIR="$pkgdir" PREFIX=/usr       # packaging
 #   make static && make install-static               # fully static binary (musl)
 #   make dist                                        # release tarball in dist/
@@ -21,21 +22,35 @@ STATIC_BIN := target/$(MUSL_TARGET)/release/sshh
 # No version in the name, so .../releases/latest/download/<name> always works.
 DIST_NAME := sshh-$(MUSL_TARGET)
 
-.PHONY: all build static install install-static install-files uninstall dist version man lint-man test
+.PHONY: help build static install install-static install-files uninstall dist version man lint-man test
+.DEFAULT_GOAL := help
 
-all: build
+# Targets are documented with a `## ` comment after their name; `help` prints them.
+help: ## Show this help
+	@echo "Usage: make <target> [VARIABLE=value]"
+	@echo
+	@echo "Targets:"
+	@awk -F ':.*## ' '/^[a-z-]+:.*## / { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@echo
+	@echo "Variables:"
+	@echo "  PREFIX          where to install (now: $(PREFIX))"
+	@echo "  DESTDIR         staging root prepended to PREFIX, for packaging"
+	@echo "  MUSL_TARGET     target of the static build (now: $(MUSL_TARGET))"
+	@echo "  CARGO           cargo binary to use (now: $(CARGO))"
+	@echo
+	@echo "Typical use: make build && make install"
 
-build:
+build: ## Build the release binary (target/release/sshh)
 	$(CARGO) build --release --locked
 
-static:
+static: ## Build a fully static binary (musl; needs the musl target and musl-gcc)
 	$(CARGO) build --release --locked --target $(MUSL_TARGET)
 
 # Doesn't build, so `sudo make install` never runs cargo as root.
-install:
-	@$(MAKE) --no-print-directory install-files SRC_BIN=$(BIN)
+install: ## Install the binary of 'make build' and the man page under PREFIX
+	@$(MAKE) --no-print-directory install-files SRC_BIN=$(BIN) BUILD_HINT=build
 
-install-static:
+install-static: ## Install the binary of 'make static' and the man page under PREFIX
 	@$(MAKE) --no-print-directory install-files SRC_BIN=$(STATIC_BIN) BUILD_HINT=static
 
 install-files:
@@ -43,12 +58,12 @@ install-files:
 	install -Dm755 $(SRC_BIN) $(DESTDIR)$(BINDIR)/sshh
 	install -Dm644 man/sshh.1 $(DESTDIR)$(MANDIR)/man1/sshh.1
 
-uninstall:
+uninstall: ## Remove the installed binary and man page (same PREFIX/DESTDIR)
 	rm -f $(DESTDIR)$(BINDIR)/sshh $(DESTDIR)$(MANDIR)/man1/sshh.1
 
 # Release tarball with the static binary: dist/sshh-<target>.tar.gz (+ .sha256).
 # Unpack it and copy `sshh` to your PATH and `sshh.1` to man1 (install.sh does it).
-dist: static
+dist: static ## Build the release tarball with the static binary in dist/ (+ .sha256)
 	rm -rf dist/$(DIST_NAME)
 	install -Dm755 $(STATIC_BIN) dist/$(DIST_NAME)/sshh
 	install -Dm644 man/sshh.1 dist/$(DIST_NAME)/sshh.1
@@ -69,16 +84,16 @@ $(eval $(VERSION_ARG):;@:)
 endif
 endif
 
-version:
+version: ## Bump the version and commit: make version <vX.Y.Z | patch | minor | major>
 	@test -n "$(VERSION_ARG)" || { echo "usage: make version <vX.Y.Z | patch | minor | major>" >&2; exit 1; }
 	@scripts/bump.sh $(VERSION_ARG)
 
 # Preview the man page without installing it.
-man:
+man: ## Preview the man page without installing it
 	man -l man/sshh.1
 
-lint-man:
+lint-man: ## Check the man page with groff
 	groff -man -ww -z man/sshh.1
 
-test:
+test: ## Run the tests (cargo test)
 	$(CARGO) test

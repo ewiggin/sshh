@@ -68,19 +68,20 @@ curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | sh -
 ### From a clone
 
 ```sh
-git clone https://github.com/ewiggin/sshh.git && cd sshh && make && make install
+git clone https://github.com/ewiggin/sshh.git && cd sshh && make build && make install
 ```
 
 `./install.sh` also works inside a clone (it installs that code). To update a clone, run
-`git pull && make && make install`.
+`git pull && make build && make install`.
 
 Other options, from the cloned directory:
 
 ```sh
-make && sudo make install PREFIX=/usr/local      # system wide
-make install DESTDIR="$pkgdir" PREFIX=/usr       # packaging
-make uninstall                                   # same PREFIX/DESTDIR as when installing
-make man                                         # preview the man page without installing it
+make                                                # list every target with a description
+make build && sudo make install PREFIX=/usr/local   # system wide
+make install DESTDIR="$pkgdir" PREFIX=/usr          # packaging
+make uninstall                                      # same PREFIX/DESTDIR as when installing
+make man                                            # preview the man page without installing it
 ```
 
 `make install` doesn't compile, so `sudo make install` never runs cargo as root.

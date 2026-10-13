@@ -88,7 +88,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - crates.io: the package is `sshh-tui` (`sshh` is taken) with `[[bin]] name = "sshh"`;
   `[package.metadata.binstall]` points to the release tarballs (keep it in sync with their names).
   `cargo publish` after pushing the release tag; `exclude` keeps CI/scripts out of the crate.
-- Install: `make && make install` (PREFIX defaults to `~/.local`; `install` never builds), or
+- Install: `make build && make install` (PREFIX defaults to `~/.local`; `install` never builds;
+  plain `make` only lists the targets, documented with `## ` comments in the Makefile), or
   `install.sh` (POSIX sh, used as `curl … | sh`): downloads the release tarball for Linux
   x86_64/aarch64 and checks its sha256; falls back to building from source (clone + make), and
   always builds when run from a clone or with `SSHH_FROM_SOURCE`/`SSHH_REF`. Uses sudo only for the
