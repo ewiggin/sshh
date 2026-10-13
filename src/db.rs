@@ -43,6 +43,19 @@ CREATE TABLE history (
     args         TEXT NOT NULL
 );
 CREATE INDEX history_host ON history(host_id, connected_at);
+"#, r#"
+CREATE TABLE layouts (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+);
+CREATE TABLE layout_panes (
+    layout_id INTEGER NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
+    col       INTEGER NOT NULL,
+    row       INTEGER NOT NULL,
+    host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    sftp      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (layout_id, col, row)
+);
 "#];
 
 const HOST_SELECT: &str = "
@@ -216,6 +229,59 @@ impl Db {
         })
         .collect()
     }
+
+    /// Saves a layout, replacing the one with the same name if any. Returns
+    /// true if it replaced one.
+    pub fn save_layout(&mut self, layout: &Layout) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        let replaced = tx.execute("DELETE FROM layouts WHERE name = ?1", [&layout.name])? > 0;
+        tx.execute("INSERT INTO layouts (name) VALUES (?1)", [&layout.name])?;
+        let id = tx.last_insert_rowid();
+        for (col, panes) in layout.columns.iter().enumerate() {
+            for (row, (host, sftp)) in panes.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO layout_panes (layout_id, col, row, host_id, sftp) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![id, col as i64, row as i64, host, sftp],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(replaced)
+    }
+
+    pub fn delete_layout(&self, name: &str) -> Result<bool> {
+        Ok(self.conn.execute("DELETE FROM layouts WHERE name = ?1", [name])? > 0)
+    }
+
+    /// All layouts by name. Panes of deleted connections are gone, so a
+    /// layout can have fewer panes than when it was saved (or none).
+    pub fn list_layouts(&self) -> Result<Vec<Layout>> {
+        let mut stmt = self.conn.prepare("SELECT id, name FROM layouts ORDER BY name COLLATE NOCASE")?;
+        let layouts = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT col, host_id, sftp FROM layout_panes WHERE layout_id = ?1 ORDER BY col, row")?;
+        layouts
+            .into_iter()
+            .map(|(id, name)| {
+                let panes = stmt
+                    .query_map([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, bool>(2)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let mut columns: Vec<Vec<(i64, bool)>> = Vec::new();
+                let mut last = None;
+                for (col, host, sftp) in panes {
+                    if last != Some(col) {
+                        columns.push(Vec::new());
+                        last = Some(col);
+                    }
+                    columns.last_mut().expect("just pushed").push((host, sftp));
+                }
+                Ok(Layout { name, columns })
+            })
+            .collect()
+    }
 }
 
 /// What to do when importing a connection whose alias already exists with different data.
@@ -239,6 +305,14 @@ pub struct ImportReport {
     pub renamed: Vec<(String, String)>,
     /// (alias, reason)
     pub skipped: Vec<(String, String)>,
+}
+
+/// A saved arrangement of panes: columns left to right, each a stack of
+/// panes top to bottom (connection id, true if it shows sftp instead of ssh).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    pub name: String,
+    pub columns: Vec<Vec<(i64, bool)>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -553,6 +627,31 @@ mod tests {
         assert!(!db.delete_by_alias("a").unwrap());
         let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn layouts_are_saved_replaced_and_follow_deleted_hosts() {
+        let mut db = Db::open_in_memory().unwrap();
+        let (a, b, c) = (
+            db.insert_host(&sample("a")).unwrap(),
+            db.insert_host(&sample("b")).unwrap(),
+            db.insert_host(&sample("c")).unwrap(),
+        );
+        let layout = Layout { name: "prod".into(), columns: vec![vec![(a, false), (b, true)], vec![(c, false)]] };
+        assert!(!db.save_layout(&layout).unwrap());
+        db.save_layout(&Layout { name: "Alpha".into(), columns: vec![vec![(a, false)]] }).unwrap();
+        assert_eq!(db.list_layouts().unwrap()[1], layout);
+        // Same name: replaced.
+        let layout = Layout { name: "prod".into(), columns: vec![vec![(a, false)], vec![(c, false)]] };
+        assert!(db.save_layout(&layout).unwrap());
+        assert_eq!(db.list_layouts().unwrap()[1], layout);
+        // A deleted connection leaves its panes; an emptied column disappears.
+        db.delete_by_alias("a").unwrap();
+        let layouts = db.list_layouts().unwrap();
+        assert_eq!(layouts[0].columns, Vec::<Vec<(i64, bool)>>::new());
+        assert_eq!(layouts[1].columns, [[(c, false)]]);
+        assert!(db.delete_layout("prod").unwrap());
+        assert!(!db.delete_layout("prod").unwrap());
     }
 
     #[test]

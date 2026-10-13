@@ -306,11 +306,11 @@ or
 go back to the list keeping the filter.
 .TP
 .BR [ ", " ]
-Switch the list between the
-.B Connections
-and
+Switch the list to the previous or next tab:
+.BR Connections ,
 .B Tags
-tabs.
+and
+.BR Layouts .
 The Tags tab lists every tag with its number of connections, and the
 details pane previews the connections of the highlighted tag.
 There,
@@ -324,6 +324,24 @@ goes back without filtering.
 opens every connection of the tag in panes, replacing the current ones
 (their sessions keep running): as many columns as fit, the rest stacked.
 Connections that don't fit are not opened.
+.IP
+The Layouts tab lists the saved layouts: which connection is in which pane.
+There,
+.B a
+saves the current panes under the name you type (an existing name replaces
+that layout),
+.B Space
+or
+.B Enter
+opens the highlighted layout, replacing the current panes (their sessions
+keep running) and opening the sessions that aren't alive, and
+.B dd
+deletes it after confirming.
+The panes of a deleted connection disappear from the layouts.
+If the window is too small for the saved shape, the panes are rearranged
+in a grid and those that don't fit are not opened.
+Layouts are not part of
+.BR "sshh export" .
 .TP
 .B a
 Add a connection.

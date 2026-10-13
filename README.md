@@ -202,10 +202,11 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
 ```
 
 - **Left**: search, the connection list (alias, name and tags) and the details of the selected one
-  (target, options, tags, usage, notes). The list pane has two tabs, **Connections** and **Tags**
-  (switch with `[` / `]` or a click on the tab): the Tags tab lists every tag with its number of
-  connections, the details pane previews the connections of the highlighted tag, and `Space` goes back
-  to the connections filtered by that tag (`#tag` in the search box; `Esc` clears it).
+  (target, options, tags, usage, notes). The list pane has three tabs, **Connections**, **Tags** and
+  **Layouts** (switch with `[` / `]` or a click on the tab): the Tags tab lists every tag with its
+  number of connections, the details pane previews the connections of the highlighted tag, and `Space`
+  goes back to the connections filtered by that tag (`#tag` in the search box; `Esc` clears it). The
+  Layouts tab lists the saved pane layouts (see below).
 - **Right**: **terminal columns**, each showing an embedded session side by side: the ssh session of
   a connection or, with `s`, its sftp session (a connection can have both open at once). Connections with a live session are marked with a green `●` in the list (a grey `○` means
   the session ended). Closing a column doesn't close its session. With no column open, the right side
@@ -285,7 +286,7 @@ List and general keys:
 | `Ctrl-f` / `Ctrl-b`, `PgDn` / `PgUp` | page down / up |
 | `Tab` / `Shift-Tab` | next / previous pane: list → details → active column (if any; inside it `Tab` goes to ssh, leave with `Alt-h`) |
 | `/` | search |
-| `[` / `]` | switch tab: Connections / Tags (in Tags, `Space` or `Enter` filters by the tag, `Esc` goes back) |
+| `[` / `]` | previous / next tab: Connections / Tags / Layouts (in Tags, `Space` or `Enter` filters by the tag, `Esc` goes back) |
 | `Alt-v` (on a tag, in Tags) | open every connection of the tag in panes, replacing the current ones (their sessions keep running); as many columns as fit, the rest stacked. Then `Alt-a` types in all of them |
 | `a` | add a connection |
 | `Enter`, `e` | edit |
@@ -299,6 +300,20 @@ List and general keys:
 | `?` | help |
 | `Esc` | go back one level / clear the search (never quits) |
 | `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
+
+**Layouts** save which connection is in which pane, to get the same panes back later. In the Layouts
+tab:
+
+| Key | Action |
+|---|---|
+| `a` | save the current panes as a layout: type a name and press `Enter` (an existing name replaces that layout) |
+| `Space`, `Enter` | open the layout: its panes replace the current ones (their sessions keep running), opening the sessions that aren't alive |
+| `dd` | delete the layout (asks for confirmation with `y`) |
+
+The details pane previews the panes of the highlighted layout. A layout keeps ssh and sftp panes; the
+panes of a deleted connection disappear from it. If the window is too small for the saved shape the
+panes are rearranged in a grid, and those that don't fit are not opened. Layouts are stored in the
+database but are not part of `sshh export`.
 
 While a **terminal column has focus, every key goes to its ssh session** (including `Esc`, `Ctrl-c`,
 `q`, `Tab` and `Ctrl-w`), except the `Alt` shortcuts above. Note that `Alt-f` (readline: forward a
@@ -338,7 +353,7 @@ filtered while you type and matching letters are highlighted.
 | Action | Effect |
 |---|---|
 | Click on a tab title | switch to that tab |
-| Click on a row | select (a tag in the Tags tab; double click filters by it) |
+| Click on a row | select (a tag in the Tags tab; double click filters by it; in the Layouts tab it opens the layout) |
 | Double click | open the session (like `Space`) |
 | Click on a column | focus it |
 | Wheel | move · scroll the details · scroll back the history of the column under the pointer |

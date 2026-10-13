@@ -32,6 +32,7 @@ type Sessions = HashMap<SessionKey, Session>;
 pub fn run() -> Result<()> {
     let mut db = Db::open_default()?;
     let mut app = App::new(db.list_hosts()?);
+    app.set_layouts(db.list_layouts()?, None);
     let mut sessions = Sessions::new();
     let mut terminal = term::init()?;
     let outcome = event_loop(&mut terminal, &mut db, &mut app, &mut sessions);
@@ -246,6 +247,8 @@ fn handle_request(
                         sessions.retain(|key, _| key.host != id);
                     }
                     app.set_hosts(db.list_hosts()?, None);
+                    // Its panes are gone from the layouts.
+                    app.set_layouts(db.list_layouts()?, None);
                     app.info(format!("Connection '{alias}' deleted"));
                     refresh_include(db, app);
                 }
@@ -268,10 +271,25 @@ fn handle_request(
             reload_hosts(db, app)?;
             app.info("List reloaded");
         }
+        Request::SaveLayout(layout) => match db.save_layout(&layout) {
+            Ok(replaced) => {
+                app.set_layouts(db.list_layouts()?, Some(&layout.name));
+                let what = if replaced { "updated" } else { "saved" };
+                app.info(format!("Layout '{}' {what}", layout.name));
+            }
+            Err(e) => app.error(format!("Could not save the layout: {e:#}")),
+        },
+        Request::DeleteLayout(name) => match db.delete_layout(&name) {
+            Ok(_) => {
+                app.set_layouts(db.list_layouts()?, None);
+                app.info(format!("Layout '{name}' deleted"));
+            }
+            Err(e) => app.error(format!("Could not delete the layout: {e:#}")),
+        },
         Request::OpenSession(host, kind) => open_session(db, app, sessions, dirty, &host, kind)?,
         Request::OpenSessions(hosts) => {
-            for host in &hosts {
-                open_session(db, app, sessions, dirty, host, SessionKind::Ssh)?;
+            for (host, kind) in &hosts {
+                open_session(db, app, sessions, dirty, host, *kind)?;
             }
         }
         Request::CloseSessions(id) => {

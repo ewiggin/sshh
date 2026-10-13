@@ -46,11 +46,14 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `form.rs` = add/edit/wizard form. `ui.rs` = rendering. `term.rs` = terminal, $EDITOR, external
   programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and
   clipboard (wl-copy/xclip, OSC 52 fallback).
-- List pane tabs (`App::tab`, `ListTab`): Connections and Tags (`[`/`]`, click on the title via
+- List pane tabs (`App::tab`, `ListTab`): Connections, Tags and Layouts (`[`/`]`, click on the title via
   `App::tab_areas`). Tags tab = `App::tags` (name + count, recomputed in `refilter`); Space/Enter
   sets the query to `#tag` and goes back; connection actions are ignored there (`on_tags_key`).
   `Alt-v` on a tag (`App::open_tag`) replaces the panes with a grid of the tag's connections and
-  asks for the missing sessions with `Request::OpenSessions`.
+  asks for the missing sessions with `Request::OpenSessions`. Tags and Layouts share `on_side_key`.
+  Layouts tab = `App::layouts` (`db::Layout`, tables `layouts` + `layout_panes`, which cascade when
+  a connection is deleted): `a` saves the panes (`Mode::LayoutName` → `Request::SaveLayout`), Space
+  restores them (`App::open_layout`, `grid` if they don't fit), `dd` deletes.
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,

@@ -63,6 +63,12 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
             vec!["Delete connection ".into(), alias.clone().bold(), "?".into()],
             "delete",
         ),
+        Mode::ConfirmDeleteLayout { name } => draw_confirm(
+            frame,
+            vec!["Delete layout ".into(), name.clone().bold(), "?".into()],
+            "delete",
+        ),
+        Mode::LayoutName(name) => draw_layout_name(frame, name),
         Mode::ConfirmClose { alias, .. } => draw_confirm(
             frame,
             vec!["Close the session of ".into(), alias.clone().bold(), "?".into()],
@@ -136,10 +142,27 @@ fn session_dot(state: Option<SessionState>) -> Span<'static> {
 /// each tab was drawn so it can be clicked.
 fn list_block(app: &mut App, area: Rect) -> Block<'static> {
     let focused = pane_focused(app, Focus::List);
-    let tabs = [
-        (ListTab::Connections, format!(" Connections {}/{} ", app.entries.len(), app.hosts.len())),
-        (ListTab::Tags, format!(" Tags {} ", app.tags.len())),
-    ];
+    let titles = |counts: bool| {
+        ListTab::ALL.map(|tab| {
+            let text = match tab {
+                ListTab::Connections if counts || tab == app.tab => {
+                    format!(" Connections {}/{} ", app.entries.len(), app.hosts.len())
+                }
+                ListTab::Connections => " Connections ".to_string(),
+                ListTab::Tags if counts || tab == app.tab => format!(" Tags {} ", app.tags.len()),
+                ListTab::Tags => " Tags ".to_string(),
+                ListTab::Layouts if counts || tab == app.tab => format!(" Layouts {} ", app.layouts.len()),
+                ListTab::Layouts => " Layouts ".to_string(),
+            };
+            (tab, text)
+        })
+    };
+    // In a narrow pane only the active tab shows its count.
+    let width = |tabs: &[(ListTab, String)]| tabs.iter().map(|(_, t)| t.chars().count() + 1).sum::<usize>();
+    let mut tabs = titles(true);
+    if width(&tabs) > usize::from(area.width) {
+        tabs = titles(false);
+    }
     let mut spans = Vec::new();
     let mut x = area.x + 1;
     app.tab_areas.clear();
@@ -169,9 +192,10 @@ fn list_block(app: &mut App, area: Rect) -> Block<'static> {
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = list_block(app, area);
     app.rows_area = block.inner(area);
-    if app.tab == ListTab::Tags {
-        draw_tags(frame, app, block, area);
-        return;
+    match app.tab {
+        ListTab::Connections => {}
+        ListTab::Tags => return draw_tags(frame, app, block, area),
+        ListTab::Layouts => return draw_layouts(frame, app, block, area),
     }
 
     if app.entries.is_empty() {
@@ -230,6 +254,60 @@ fn draw_tags(frame: &mut Frame, app: &mut App, block: Block<'static>, area: Rect
     frame.render_stateful_widget(table, area, &mut app.tag_table);
 }
 
+/// The Layouts tab: every saved layout with its number of panes.
+fn draw_layouts(frame: &mut Frame, app: &mut App, block: Block<'static>, area: Rect) {
+    if app.layouts.is_empty() {
+        let p = Paragraph::new("No layouts yet.\nOpen some panes and press 'a'.").dim().centered();
+        let [middle] = Layout::vertical([Constraint::Length(2)]).flex(Flex::Center).areas(app.rows_area);
+        frame.render_widget(block, area);
+        frame.render_widget(p, middle);
+        return;
+    }
+    let rows = app.layouts.iter().map(|l| {
+        let panes: usize = l.columns.iter().map(Vec::len).sum();
+        Row::new([Cell::from(l.name.clone()), Cell::from(Line::from(panes.to_string()).right_aligned().dim())])
+    });
+    let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
+        .block(block)
+        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+        .highlight_spacing(HighlightSpacing::Never);
+    frame.render_stateful_widget(table, area, &mut app.layout_table);
+}
+
+/// Details pane in the Layouts tab: the panes of the highlighted layout.
+fn draw_layout_preview(frame: &mut Frame, app: &mut App, area: Rect) {
+    let Some(layout) = app.selected_layout() else {
+        frame.render_widget(block("Details", false), area);
+        return;
+    };
+    let mut lines = Vec::new();
+    for (c, panes) in layout.columns.iter().enumerate() {
+        for (r, (id, sftp)) in panes.iter().enumerate() {
+            let Some(host) = app.host(*id) else { continue };
+            let number = match panes.len() {
+                1 => (c + 1).to_string(),
+                _ => format!("{}.{}", c + 1, r + 1),
+            };
+            lines.push(Line::from(vec![
+                format!("{number:<4}").dim(),
+                session_dot(app.host_session(host.id)),
+                " ".into(),
+                host.data.alias.clone().bold(),
+                "  ".into(),
+                if *sftp { "sftp".to_string() } else { host.data.target() }.dim(),
+            ]));
+        }
+    }
+    let noun = if lines.len() == 1 { "pane" } else { "panes" };
+    let title = format!("{} · {} {noun}", layout.name, lines.len());
+    let block = block(&title, pane_focused(app, Focus::Detail));
+    let p = Paragraph::new(lines).block(block);
+    let max_scroll = (p.line_count(area.width) as u16).saturating_sub(area.height);
+    let scroll = app.detail_scroll.min(max_scroll);
+    frame.render_widget(p.scroll((scroll, 0)), area);
+    app.detail_scroll = scroll;
+}
+
 fn tags_text(d: &HostData) -> String {
     d.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
@@ -240,9 +318,10 @@ fn tags_line(host: &Host) -> Line<'static> {
 
 fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     app.detail_area = area;
-    if app.tab == ListTab::Tags {
-        draw_tag_preview(frame, app, area);
-        return;
+    match app.tab {
+        ListTab::Connections => {}
+        ListTab::Tags => return draw_tag_preview(frame, app, area),
+        ListTab::Layouts => return draw_layout_preview(frame, app, area),
     }
     let block = block("Details", pane_focused(app, Focus::Detail));
     let Some(host) = app.selected_host() else {
@@ -620,6 +699,17 @@ fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
             &[("Enter", "connect"), ("Esc Alt-h", "back"), ("Alt-w", "close pane")]
         }
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
+        (Mode::LayoutName(_), ..) => &[("", "an existing name replaces that layout")],
+        _ if app.tab == ListTab::Layouts => &[
+            ("Space", "open layout"),
+            ("a", "save panes as layout"),
+            ("dd", "delete"),
+            ("j/k", "move"),
+            ("[ ]", "tabs"),
+            ("Esc", "connections"),
+            ("?", "help"),
+            ("q", "quit"),
+        ],
         _ if app.tab == ListTab::Tags => &[
             ("Space", "filter by tag"),
             ("Alt-v", "open all in panes"),
@@ -636,7 +726,7 @@ fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
             ("/", "search"),
             ("a", "add"),
             ("Enter/e", "edit"),
-            ("[ ]", "tags"),
+            ("[ ]", "tags/layouts"),
             ("x", "close session"),
             ("f", "full screen"),
             ("?", "help"),
@@ -676,6 +766,15 @@ fn draw_confirm(frame: &mut Frame, question: Vec<Span<'_>>, action: &str) {
     frame.render_widget(Paragraph::new(lines).centered().block(block), area);
 }
 
+/// Prompt for the name of the layout to save.
+fn draw_layout_name(frame: &mut Frame, name: &str) {
+    let area = centered(frame.area(), 56, 3);
+    frame.render_widget(Clear, area);
+    let block = block("Save the panes as layout", true)
+        .title_bottom(Line::from(" Enter save · Esc cancel ".dim()).right_aligned());
+    frame.render_widget(Paragraph::new(format!(" {name}█")).block(block), area);
+}
+
 fn draw_help(frame: &mut Frame) {
     const HELP: &[(&str, &str)] = &[
         ("Space", "show the connection in the active pane"),
@@ -700,8 +799,10 @@ fn draw_help(frame: &mut Frame) {
         ("Ctrl-f/b", "page down / up"),
         ("Tab / S-Tab", "next / previous pane (list, details, terminal)"),
         ("/", "search (filters while typing; #tag by tag)"),
-        ("[ / ]", "tabs: connections / tags (Space on a tag filters)"),
+        ("[ / ]", "tabs: connections / tags / layouts"),
+        ("Space (on a tag)", "filter the connections by it"),
         ("Alt-v (on a tag)", "open all its connections in panes"),
+        ("Layouts tab", "a saves the panes, Space opens, dd deletes"),
         ("Esc", "back / clear search"),
         ("", ""),
         ("a", "add connection"),

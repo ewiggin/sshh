@@ -15,7 +15,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
 
 use super::form::{self, Form, FormEvent, FormKind};
-use crate::db::HistoryEntry;
+use crate::db::{HistoryEntry, Layout};
 use crate::model::{Host, HostData};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -25,6 +25,8 @@ const MIN_COLUMN_WIDTH: u16 = 40;
 const MIN_PANE_HEIGHT: u16 = 6;
 /// Columns reachable with Alt-1..Alt-9.
 const MAX_COLUMNS: usize = 9;
+/// Longest layout name accepted by the prompt.
+const MAX_LAYOUT_NAME: usize = 40;
 
 /// How the TUI ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,8 +86,11 @@ pub enum Request {
     Reload,
     /// Open (or reopen, if it ended) an embedded session of a connection.
     OpenSession(Box<Host>, SessionKind),
-    /// Open an ssh session of each of these connections.
-    OpenSessions(Vec<Host>),
+    /// Open a session of each of these connections.
+    OpenSessions(Vec<(Host, SessionKind)>),
+    /// Save a layout, replacing the one with the same name.
+    SaveLayout(Layout),
+    DeleteLayout(String),
     /// Close every session of a connection.
     CloseSessions(i64),
     /// Input for an embedded session.
@@ -125,6 +130,9 @@ pub enum Mode {
     Help,
     Form(Box<Form>),
     ConfirmDelete { alias: String },
+    /// Typing the name to save the panes under.
+    LayoutName(String),
+    ConfirmDeleteLayout { name: String },
     ConfirmClose { id: i64, alias: String },
     ConfirmQuit { sessions: usize },
 }
@@ -176,6 +184,11 @@ pub enum ListTab {
     #[default]
     Connections,
     Tags,
+    Layouts,
+}
+
+impl ListTab {
+    pub const ALL: [Self; 3] = [Self::Connections, Self::Tags, Self::Layouts];
 }
 
 /// A tag and how many connections have it.
@@ -214,6 +227,9 @@ pub struct App {
     /// Every tag in use, alphabetically, for the Tags tab.
     pub tags: Vec<TagEntry>,
     pub tag_table: TableState,
+    /// Saved layouts, by name, for the Layouts tab (loaded by the main loop).
+    pub layouts: Vec<Layout>,
+    pub layout_table: TableState,
     /// Where each tab title was drawn (for the mouse).
     pub tab_areas: Vec<(ListTab, Rect)>,
     pub table: TableState,
@@ -267,6 +283,8 @@ impl App {
             tab: ListTab::default(),
             tags: Vec::new(),
             tag_table: TableState::default(),
+            layouts: Vec::new(),
+            layout_table: TableState::default(),
             tab_areas: Vec::new(),
             table: TableState::default(),
             detail_scroll: 0,
@@ -595,19 +613,52 @@ impl App {
         self.tag_table.select(selected);
     }
 
-    fn move_tag_by(&mut self, delta: isize) {
-        let current = self.tag_table.selected().unwrap_or(0) as isize;
-        self.select_tag(current.saturating_add(delta).max(0) as usize);
+    /// Replaces the layouts (after saving or deleting one), selecting `name`
+    /// or, failing that, the same position.
+    pub fn set_layouts(&mut self, layouts: Vec<Layout>, name: Option<&str>) {
+        let index = name.and_then(|name| layouts.iter().position(|l| l.name == name));
+        self.layouts = layouts;
+        self.select_layout(index.unwrap_or_else(|| self.layout_table.selected().unwrap_or(0)));
     }
 
-    fn switch_tab(&mut self) {
-        self.tab = match self.tab {
-            ListTab::Connections => ListTab::Tags,
-            ListTab::Tags => ListTab::Connections,
-        };
+    pub fn selected_layout(&self) -> Option<&Layout> {
+        self.layouts.get(self.layout_table.selected()?)
+    }
+
+    fn select_layout(&mut self, index: usize) {
+        let selected = self.layouts.len().checked_sub(1).map(|last| index.min(last));
+        if selected != self.layout_table.selected() {
+            self.detail_scroll = 0;
+        }
+        self.layout_table.select(selected);
+    }
+
+    /// Selects a row of the Tags or Layouts tab.
+    fn select_side(&mut self, index: usize) {
+        match self.tab {
+            ListTab::Layouts => self.select_layout(index),
+            _ => self.select_tag(index),
+        }
+    }
+
+    fn move_side_by(&mut self, delta: isize) {
+        let table = if self.tab == ListTab::Layouts { &self.layout_table } else { &self.tag_table };
+        let current = table.selected().unwrap_or(0) as isize;
+        self.select_side(current.saturating_add(delta).max(0) as usize);
+    }
+
+    fn set_tab(&mut self, tab: ListTab) {
+        self.tab = tab;
         self.mode = Mode::Normal;
         self.focus = Focus::List;
         self.detail_scroll = 0;
+    }
+
+    fn switch_tab(&mut self, forward: bool) {
+        let tabs = ListTab::ALL;
+        let current = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
+        let next = if forward { current + 1 } else { current + tabs.len() - 1 };
+        self.set_tab(tabs[next % tabs.len()]);
     }
 
     /// Space on a tag: back to the connections, filtered by that tag.
@@ -620,24 +671,81 @@ impl App {
         self.query_changed();
     }
 
-    /// Keys of the Tags tab; returns false for the general keys it lets through.
-    fn on_tags_key(&mut self, key: KeyEvent, ctrl: bool, pending: Option<char>) -> bool {
+    /// `a` in the Layouts tab: asks for a name to save the panes under.
+    fn name_layout(&mut self) {
+        if self.columns.is_empty() {
+            self.error("No panes to save: open some connections first");
+        } else {
+            self.mode = Mode::LayoutName(String::new());
+        }
+    }
+
+    /// Space on a layout: replaces the panes with the saved ones, opening the
+    /// sessions that aren't alive. The sessions of the panes it replaces keep
+    /// running.
+    fn open_layout(&mut self) {
+        let Some(layout) = self.selected_layout() else { return };
+        let name = layout.name.clone();
+        let mut columns: Vec<Vec<SessionKey>> = layout
+            .columns
+            .iter()
+            .map(|panes| {
+                let keys = panes.iter().map(|&(host, sftp)| {
+                    SessionKey { host, kind: if sftp { SessionKind::Sftp } else { SessionKind::Ssh } }
+                });
+                keys.filter(|k| self.host(k.host).is_some()).collect::<Vec<_>>()
+            })
+            .filter(|panes| !panes.is_empty())
+            .collect();
+        let total: usize = columns.iter().map(Vec::len).sum();
+        if total == 0 {
+            self.error(format!("Layout '{name}' has no connections left"));
+            return;
+        }
+        let max_panes = self.max_panes_per_column();
+        let fits = columns.len() <= self.max_columns() && columns.iter().all(|panes| panes.len() <= max_panes);
+        if !fits {
+            columns = self.grid(columns.into_iter().flatten().collect());
+        }
+        let shown: usize = columns.iter().map(Vec::len).sum();
+        self.show_panes(columns);
+        if shown < total {
+            self.error(format!("Layout '{name}': only {shown} of its {total} panes fit"));
+        } else if !fits {
+            self.info(format!("Layout '{name}' open, rearranged to fit"));
+        } else {
+            self.info(format!("Layout '{name}' open"));
+        }
+    }
+
+    /// Keys of the Tags and Layouts tabs; returns false for the general keys
+    /// they let through.
+    fn on_side_key(&mut self, key: KeyEvent, ctrl: bool, pending: Option<char>) -> bool {
         let page = self.page();
+        let layouts = self.tab == ListTab::Layouts;
         match key.code {
+            KeyCode::Char(' ') | KeyCode::Enter if layouts => self.open_layout(),
             KeyCode::Char(' ') | KeyCode::Enter => self.apply_tag(),
             KeyCode::Esc => self.tab = ListTab::Connections,
-            KeyCode::Char('d') if ctrl => self.move_tag_by(page / 2),
-            KeyCode::Char('u') if ctrl => self.move_tag_by(-page / 2),
-            KeyCode::Char('f') if ctrl => self.move_tag_by(page),
-            KeyCode::Char('b') if ctrl => self.move_tag_by(-page),
-            KeyCode::Char('j') | KeyCode::Down => self.move_tag_by(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_tag_by(-1),
-            KeyCode::Char('G') | KeyCode::End => self.move_tag_by(isize::MAX),
-            KeyCode::Home => self.select_tag(0),
-            KeyCode::PageDown => self.move_tag_by(page),
-            KeyCode::PageUp => self.move_tag_by(-page),
-            KeyCode::Char('g') if pending == Some('g') => self.select_tag(0),
+            KeyCode::Char('d') if ctrl => self.move_side_by(page / 2),
+            KeyCode::Char('u') if ctrl => self.move_side_by(-page / 2),
+            KeyCode::Char('f') if ctrl => self.move_side_by(page),
+            KeyCode::Char('b') if ctrl => self.move_side_by(-page),
+            KeyCode::Char('j') | KeyCode::Down => self.move_side_by(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_side_by(-1),
+            KeyCode::Char('G') | KeyCode::End => self.move_side_by(isize::MAX),
+            KeyCode::Home => self.select_side(0),
+            KeyCode::PageDown => self.move_side_by(page),
+            KeyCode::PageUp => self.move_side_by(-page),
+            KeyCode::Char('g') if pending == Some('g') => self.select_side(0),
             KeyCode::Char('g') => self.pending = Some('g'),
+            KeyCode::Char('a') if layouts => self.name_layout(),
+            KeyCode::Char('d') if layouts && pending == Some('d') => {
+                if let Some(layout) = self.selected_layout() {
+                    self.mode = Mode::ConfirmDeleteLayout { name: layout.name.clone() };
+                }
+            }
+            KeyCode::Char('d') if layouts => self.pending = Some('d'),
             KeyCode::Char('q' | '?' | '/' | '[' | ']' | 'a' | 'R') | KeyCode::Tab | KeyCode::BackTab => {
                 return false;
             }
@@ -737,32 +845,47 @@ impl App {
     /// sessions of the panes it replaces keep running.
     fn open_tag(&mut self) {
         let Some(tag) = self.selected_tag().map(|t| t.name.clone()) else { return };
-        let mut hosts: Vec<Host> = self.hosts.iter().filter(|h| h.data.tags.contains(&tag)).cloned().collect();
-        let total = hosts.len();
-        let max_columns = self.max_columns();
-        hosts.truncate(max_columns * self.max_panes_per_column());
-        if hosts.is_empty() {
+        let keys: Vec<SessionKey> =
+            self.hosts.iter().filter(|h| h.data.tags.contains(&tag)).map(|h| SessionKey::ssh(h.id)).collect();
+        let total = keys.len();
+        let columns = self.grid(keys);
+        let shown: usize = columns.iter().map(Vec::len).sum();
+        if shown == 0 {
             return;
         }
-        // As many columns as fit; the rest is stacked, evenly.
-        let count = hosts.len().min(max_columns);
-        let mut keys = hosts.iter().map(|h| SessionKey::ssh(h.id));
-        self.columns = (0..count)
-            .map(|c| {
-                let panes = hosts.len() / count + usize::from(c < hosts.len() % count);
-                keys.by_ref().take(panes).collect()
-            })
-            .collect();
-        self.zoomed = false;
-        self.focus_pane(0, 0);
-        if hosts.len() < total {
-            self.error(format!("'#{tag}' has {total} connections: only {} fit in the panes", hosts.len()));
+        self.show_panes(columns);
+        if shown < total {
+            self.error(format!("'#{tag}' has {total} connections: only {shown} fit in the panes"));
         } else {
             self.info(format!("'#{tag}': {total} connection(s) open (Alt-a types in all of them)"));
         }
-        hosts.retain(|h| self.sessions.get(&SessionKey::ssh(h.id)) != Some(&SessionState::Alive));
-        if !hosts.is_empty() {
-            self.request = Some(Request::OpenSessions(hosts));
+    }
+
+    /// Arranges sessions in as many columns as fit, stacking the rest evenly.
+    /// The ones that don't fit are left out.
+    fn grid(&self, mut keys: Vec<SessionKey>) -> Vec<Vec<SessionKey>> {
+        let max_columns = self.max_columns();
+        keys.truncate(max_columns * self.max_panes_per_column());
+        let (total, count) = (keys.len(), keys.len().min(max_columns));
+        let mut keys = keys.into_iter();
+        (0..count).map(|c| keys.by_ref().take(total / count + usize::from(c < total % count)).collect()).collect()
+    }
+
+    /// Replaces the panes with `columns` (not empty), focusing the first one
+    /// and asking for the sessions that aren't alive.
+    fn show_panes(&mut self, columns: Vec<Vec<SessionKey>>) {
+        self.columns = columns;
+        self.zoomed = false;
+        self.focus_pane(0, 0);
+        let missing: Vec<(Host, SessionKind)> = self
+            .columns
+            .iter()
+            .flatten()
+            .filter(|key| self.sessions.get(key) != Some(&SessionState::Alive))
+            .filter_map(|key| Some((self.host(key.host)?.clone(), key.kind)))
+            .collect();
+        if !missing.is_empty() {
+            self.request = Some(Request::OpenSessions(missing));
         }
     }
 
@@ -990,6 +1113,10 @@ impl App {
                 self.query_changed();
             }
             Mode::Form(form) => form.paste(text),
+            Mode::LayoutName(name) => {
+                let room = MAX_LAYOUT_NAME.saturating_sub(name.chars().count());
+                name.extend(text.chars().filter(|c| !c.is_control()).take(room));
+            }
             _ => {}
         }
     }
@@ -1038,6 +1165,36 @@ impl App {
                 }
                 self.mode = Mode::Normal;
             }
+            Mode::LayoutName(name) => match key.code {
+                KeyCode::Esc => self.mode = Mode::Normal,
+                KeyCode::Char('c') if ctrl => self.mode = Mode::Normal,
+                KeyCode::Enter if !name.trim().is_empty() => {
+                    let columns = self
+                        .columns
+                        .iter()
+                        .map(|panes| panes.iter().map(|k| (k.host, k.kind == SessionKind::Sftp)).collect())
+                        .collect();
+                    self.request = Some(Request::SaveLayout(Layout { name: name.trim().to_string(), columns }));
+                    self.mode = Mode::Normal;
+                }
+                KeyCode::Backspace => {
+                    name.pop();
+                }
+                KeyCode::Char(c)
+                    if !ctrl
+                        && !key.modifiers.contains(KeyModifiers::ALT)
+                        && name.chars().count() < MAX_LAYOUT_NAME =>
+                {
+                    name.push(c);
+                }
+                _ => {}
+            },
+            Mode::ConfirmDeleteLayout { name } => {
+                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.request = Some(Request::DeleteLayout(name.clone()));
+                }
+                self.mode = Mode::Normal;
+            }
             Mode::ConfirmClose { id, .. } => {
                 let id = *id;
                 self.mode = Mode::Normal;
@@ -1066,13 +1223,14 @@ impl App {
             return;
         }
         if self.focus == Focus::List
-            && self.tab == ListTab::Tags
-            && self.on_tags_key(key, ctrl, pending)
+            && self.tab != ListTab::Connections
+            && self.on_side_key(key, ctrl, pending)
         {
             return;
         }
         match key.code {
-            KeyCode::Char('[' | ']') => self.switch_tab(),
+            KeyCode::Char('[') => self.switch_tab(false),
+            KeyCode::Char(']') => self.switch_tab(true),
             KeyCode::Char('q') => self.quit(),
             // Esc goes back one level; it never quits the app.
             KeyCode::Esc if pending.is_none() && !self.query.is_empty() => {
@@ -1260,15 +1418,15 @@ impl App {
             }
             (_, MouseEventKind::ScrollDown) if in_detail => self.scroll_detail(1),
             (_, MouseEventKind::ScrollUp) if in_detail => self.scroll_detail(-1),
-            (_, MouseEventKind::ScrollDown) if self.tab == ListTab::Tags => self.move_tag_by(1),
-            (_, MouseEventKind::ScrollUp) if self.tab == ListTab::Tags => self.move_tag_by(-1),
+            (_, MouseEventKind::ScrollDown) if self.tab != ListTab::Connections => self.move_side_by(1),
+            (_, MouseEventKind::ScrollUp) if self.tab != ListTab::Connections => self.move_side_by(-1),
             (_, MouseEventKind::ScrollDown) => self.move_by(1),
             (_, MouseEventKind::ScrollUp) => self.move_by(-1),
             (_, MouseEventKind::Down(MouseButton::Left)) => {
                 let tab = self.tab_areas.iter().find(|(_, area)| area.contains(pos)).map(|(t, _)| *t);
                 if let Some(tab) = tab {
                     if tab != self.tab {
-                        self.switch_tab();
+                        self.set_tab(tab);
                     }
                 } else if self.search_area.contains(pos) {
                     self.tab = ListTab::Connections;
@@ -1282,6 +1440,7 @@ impl App {
                     let offset = match self.tab {
                         ListTab::Connections => self.table.offset(),
                         ListTab::Tags => self.tag_table.offset(),
+                        ListTab::Layouts => self.layout_table.offset(),
                     };
                     self.click_row(offset + usize::from(pos.y - self.rows_area.y));
                 }
@@ -1296,6 +1455,7 @@ impl App {
         let rows = match self.tab {
             ListTab::Connections => self.entries.len(),
             ListTab::Tags => self.tags.len(),
+            ListTab::Layouts => self.layouts.len(),
         };
         if row >= rows {
             return;
@@ -1304,7 +1464,7 @@ impl App {
         self.focus = Focus::List;
         match self.tab {
             ListTab::Connections => self.select(row),
-            ListTab::Tags => self.select_tag(row),
+            ListTab::Tags | ListTab::Layouts => self.select_side(row),
         }
         let double = self
             .last_click
@@ -1314,6 +1474,7 @@ impl App {
             match self.tab {
                 ListTab::Connections => self.connect_selected(),
                 ListTab::Tags => self.apply_tag(),
+                ListTab::Layouts => self.open_layout(),
             }
         } else {
             self.last_click = Some((row, Instant::now()));
@@ -1601,7 +1762,7 @@ mod tests {
         // The panes are replaced; db1's session is alive, so only web1 opens.
         assert_eq!(columns(&app), ["web1", "db1"]);
         assert_eq!((app.focus, app.active_column, app.active_row), (Focus::Terminal, 0, 0));
-        assert!(matches!(&app.request, Some(Request::OpenSessions(h)) if h.len() == 1 && h[0].id == 1));
+        assert!(matches!(&app.request, Some(Request::OpenSessions(h)) if h.len() == 1 && h[0].0.id == 1));
         assert!(app.status.as_ref().is_some_and(|s| !s.error));
     }
 
@@ -1627,10 +1788,97 @@ mod tests {
         assert!(app.status.as_ref().is_some_and(|s| s.error));
     }
 
+    fn layout() -> Layout {
+        // Connection 99 no longer exists.
+        Layout { name: "ops".into(), columns: vec![vec![(1, false), (2, true)], vec![(99, false)], vec![(3, false)]] }
+    }
+
+    #[test]
+    fn layouts_tab_saves_the_panes_under_a_name() {
+        let mut app = app();
+        app.on_key(ch('['));
+        assert_eq!(app.tab, ListTab::Layouts);
+        // Nothing to save without panes.
+        app.on_key(ch('a'));
+        assert!(matches!(app.mode, Mode::Normal) && app.status.as_ref().is_some_and(|s| s.error));
+
+        let mut app = app_with_two_columns();
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        app.on_key(ch('['));
+        app.on_key(ch('a'));
+        // An empty name isn't accepted; Esc cancels.
+        app.on_key(key(KeyCode::Enter));
+        assert!(matches!(&app.mode, Mode::LayoutName(n) if n.is_empty()));
+        for c in " opx".chars() {
+            app.on_key(ch(c));
+        }
+        app.on_key(key(KeyCode::Backspace));
+        app.on_paste("s\n");
+        app.on_key(key(KeyCode::Enter));
+        let saved = Layout { name: "ops".into(), columns: vec![vec![(2, false)], vec![(3, false)]] };
+        assert_eq!(app.request.take(), Some(Request::SaveLayout(saved)));
+        assert!(matches!(app.mode, Mode::Normal));
+        app.on_key(ch('a'));
+        app.on_key(key(KeyCode::Esc));
+        assert!(matches!(app.mode, Mode::Normal) && app.request.is_none());
+    }
+
+    #[test]
+    fn space_on_a_layout_restores_its_panes() {
+        let mut app = app_with_sessions();
+        app.set_layouts(vec![layout()], None);
+        app.on_key(ch('['));
+        app.on_key(ch(' '));
+        assert_eq!(columns(&app), ["web1/db1", "dev"]);
+        assert_eq!(app.columns[0][1], SessionKey::sftp(2));
+        assert_eq!((app.focus, app.active_column, app.active_row), (Focus::Terminal, 0, 0));
+        // db1's live session is ssh, not the sftp one of the layout.
+        let Some(Request::OpenSessions(missing)) = app.request.take() else { panic!("no sessions requested") };
+        let missing: Vec<(i64, SessionKind)> = missing.iter().map(|(h, k)| (h.id, *k)).collect();
+        assert_eq!(missing, [(1, SessionKind::Ssh), (2, SessionKind::Sftp), (3, SessionKind::Ssh)]);
+
+        // Too small for the saved shape: rearranged, or cut.
+        let mut app = app_with_sessions();
+        app.set_layouts(vec![layout()], None);
+        app.columns_area = Rect::new(0, 0, 60, 18);
+        app.on_key(ch('['));
+        app.on_key(ch(' '));
+        assert_eq!(columns(&app), ["web1/db1/dev"]);
+        assert!(app.status.as_ref().is_some_and(|s| !s.error));
+        app.on_key(alt('h'));
+        app.columns_area = Rect::new(0, 0, 60, 12);
+        app.on_key(ch(' '));
+        assert_eq!(columns(&app), ["web1/db1"]);
+        assert!(app.status.as_ref().is_some_and(|s| s.error));
+    }
+
+    #[test]
+    fn dd_deletes_a_layout_after_confirming() {
+        let mut app = app();
+        let empty = Layout { name: "old".into(), columns: Vec::new() };
+        app.set_layouts(vec![empty, layout()], Some("ops"));
+        app.on_key(ch('['));
+        assert_eq!(app.selected_layout().unwrap().name, "ops");
+        app.on_key(ch('d'));
+        app.on_key(ch('d'));
+        assert!(matches!(&app.mode, Mode::ConfirmDeleteLayout { name } if name == "ops"));
+        app.on_key(ch('n'));
+        assert_eq!(app.request, None);
+        app.on_key(ch('d'));
+        app.on_key(ch('d'));
+        app.on_key(ch('y'));
+        assert_eq!(app.request.take(), Some(Request::DeleteLayout("ops".into())));
+        // A layout whose connections were all deleted opens nothing.
+        app.on_key(ch('k'));
+        app.on_key(ch(' '));
+        assert!(app.columns.is_empty() && app.status.as_ref().is_some_and(|s| s.error));
+    }
+
     #[test]
     fn tags_tab_ignores_connection_actions() {
         let mut app = app();
-        app.on_key(ch('['));
+        app.on_key(ch(']'));
         for k in [ch('x'), ch('e'), ch('f'), ch('d'), ch('d'), ch('y'), ch('y')] {
             app.on_key(k);
         }
