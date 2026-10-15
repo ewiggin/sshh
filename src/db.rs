@@ -249,6 +249,22 @@ impl Db {
         Ok(replaced)
     }
 
+    /// Renames a layout. Fails if another layout already has the new name.
+    pub fn rename_layout(&self, from: &str, to: &str) -> Result<()> {
+        let taken: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM layouts WHERE name = ?1 AND name != ?2)",
+            [to, from],
+            |r| r.get(0),
+        )?;
+        if taken {
+            bail!("a layout named '{to}' already exists");
+        }
+        if self.conn.execute("UPDATE layouts SET name = ?2 WHERE name = ?1", [from, to])? == 0 {
+            bail!("the layout no longer exists");
+        }
+        Ok(())
+    }
+
     pub fn delete_layout(&self, name: &str) -> Result<bool> {
         Ok(self.conn.execute("DELETE FROM layouts WHERE name = ?1", [name])? > 0)
     }
@@ -650,8 +666,13 @@ mod tests {
         let layouts = db.list_layouts().unwrap();
         assert_eq!(layouts[0].columns, Vec::<Vec<(i64, bool)>>::new());
         assert_eq!(layouts[1].columns, [[(c, false)]]);
-        assert!(db.delete_layout("prod").unwrap());
-        assert!(!db.delete_layout("prod").unwrap());
+        // Renamed, but not over another layout.
+        assert!(db.rename_layout("prod", "Alpha").is_err());
+        db.rename_layout("prod", "web").unwrap();
+        assert_eq!(db.list_layouts().unwrap()[1], Layout { name: "web".into(), columns: vec![vec![(c, false)]] });
+        assert!(db.rename_layout("prod", "x").is_err());
+        assert!(db.delete_layout("web").unwrap());
+        assert!(!db.delete_layout("web").unwrap());
     }
 
     #[test]

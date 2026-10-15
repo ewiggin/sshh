@@ -309,6 +309,7 @@ tab:
 |---|---|
 | `a` | save the current panes as a layout: type a name and press `Enter` (an existing name replaces that layout) |
 | `Space`, `Enter` | open the layout: its panes replace the current ones (their sessions keep running), opening the sessions that aren't alive |
+| `r` | rename the layout: edit the name and press `Enter` (it can't take the name of another layout) |
 | `dd` | delete the layout (asks for confirmation with `y`) |
 
 The details pane previews the panes of the highlighted layout. A layout keeps ssh and sftp panes; the

@@ -279,6 +279,13 @@ fn handle_request(
             }
             Err(e) => app.error(format!("Could not save the layout: {e:#}")),
         },
+        Request::RenameLayout { from, to } => match db.rename_layout(&from, &to) {
+            Ok(()) => {
+                app.set_layouts(db.list_layouts()?, Some(&to));
+                app.info(format!("Layout '{from}' renamed to '{to}'"));
+            }
+            Err(e) => app.error(format!("Could not rename the layout: {e:#}")),
+        },
         Request::DeleteLayout(name) => match db.delete_layout(&name) {
             Ok(_) => {
                 app.set_layouts(db.list_layouts()?, None);

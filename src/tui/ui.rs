@@ -68,7 +68,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
             vec!["Delete layout ".into(), name.clone().bold(), "?".into()],
             "delete",
         ),
-        Mode::LayoutName(name) => draw_layout_name(frame, name),
+        Mode::LayoutName { name, rename } => draw_layout_name(frame, name, rename.is_some()),
         Mode::ConfirmClose { alias, .. } => draw_confirm(
             frame,
             vec!["Close the session of ".into(), alias.clone().bold(), "?".into()],
@@ -699,10 +699,12 @@ fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
             &[("Enter", "connect"), ("Esc Alt-h", "back"), ("Alt-w", "close pane")]
         }
         (_, Focus::Detail, _) => &[("j/k", "scroll"), ("Tab/S-Tab", "next/prev pane"), ("Esc", "list"), ("q", "quit")],
-        (Mode::LayoutName(_), ..) => &[("", "an existing name replaces that layout")],
+        (Mode::LayoutName { rename: Some(_), .. }, ..) => &[("", "type the new name of the layout")],
+        (Mode::LayoutName { .. }, ..) => &[("", "an existing name replaces that layout")],
         _ if app.tab == ListTab::Layouts => &[
             ("Space", "open layout"),
             ("a", "save panes as layout"),
+            ("r", "rename"),
             ("dd", "delete"),
             ("j/k", "move"),
             ("[ ]", "tabs"),
@@ -766,12 +768,13 @@ fn draw_confirm(frame: &mut Frame, question: Vec<Span<'_>>, action: &str) {
     frame.render_widget(Paragraph::new(lines).centered().block(block), area);
 }
 
-/// Prompt for the name of the layout to save.
-fn draw_layout_name(frame: &mut Frame, name: &str) {
+/// Prompt for the name of the layout to save, or the new name of one.
+fn draw_layout_name(frame: &mut Frame, name: &str, rename: bool) {
     let area = centered(frame.area(), 56, 3);
     frame.render_widget(Clear, area);
-    let block = block("Save the panes as layout", true)
-        .title_bottom(Line::from(" Enter save · Esc cancel ".dim()).right_aligned());
+    let (title, action) = if rename { ("Rename the layout", "rename") } else { ("Save the panes as layout", "save") };
+    let block = block(title, true)
+        .title_bottom(Line::from(format!(" Enter {action} · Esc cancel ").dim()).right_aligned());
     frame.render_widget(Paragraph::new(format!(" {name}█")).block(block), area);
 }
 
@@ -802,7 +805,7 @@ fn draw_help(frame: &mut Frame) {
         ("[ / ]", "tabs: connections / tags / layouts"),
         ("Space (on a tag)", "filter the connections by it"),
         ("Alt-v (on a tag)", "open all its connections in panes"),
-        ("Layouts tab", "a saves the panes, Space opens, dd deletes"),
+        ("Layouts tab", "a saves the panes, Space opens, r renames, dd deletes"),
         ("Esc", "back / clear search"),
         ("", ""),
         ("a", "add connection"),

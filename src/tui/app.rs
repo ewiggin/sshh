@@ -90,6 +90,7 @@ pub enum Request {
     OpenSessions(Vec<(Host, SessionKind)>),
     /// Save a layout, replacing the one with the same name.
     SaveLayout(Layout),
+    RenameLayout { from: String, to: String },
     DeleteLayout(String),
     /// Close every session of a connection.
     CloseSessions(i64),
@@ -130,8 +131,9 @@ pub enum Mode {
     Help,
     Form(Box<Form>),
     ConfirmDelete { alias: String },
-    /// Typing the name to save the panes under.
-    LayoutName(String),
+    /// Typing the name to save the panes under, or the new name of the
+    /// layout `rename`.
+    LayoutName { name: String, rename: Option<String> },
     ConfirmDeleteLayout { name: String },
     ConfirmClose { id: i64, alias: String },
     ConfirmQuit { sessions: usize },
@@ -676,7 +678,15 @@ impl App {
         if self.columns.is_empty() {
             self.error("No panes to save: open some connections first");
         } else {
-            self.mode = Mode::LayoutName(String::new());
+            self.mode = Mode::LayoutName { name: String::new(), rename: None };
+        }
+    }
+
+    /// `r` in the Layouts tab: asks for a new name for the selected layout.
+    fn rename_layout(&mut self) {
+        if let Some(layout) = self.selected_layout() {
+            let name = layout.name.clone();
+            self.mode = Mode::LayoutName { name: name.clone(), rename: Some(name) };
         }
     }
 
@@ -740,6 +750,7 @@ impl App {
             KeyCode::Char('g') if pending == Some('g') => self.select_side(0),
             KeyCode::Char('g') => self.pending = Some('g'),
             KeyCode::Char('a') if layouts => self.name_layout(),
+            KeyCode::Char('r') if layouts => self.rename_layout(),
             KeyCode::Char('d') if layouts && pending == Some('d') => {
                 if let Some(layout) = self.selected_layout() {
                     self.mode = Mode::ConfirmDeleteLayout { name: layout.name.clone() };
@@ -1113,7 +1124,7 @@ impl App {
                 self.query_changed();
             }
             Mode::Form(form) => form.paste(text),
-            Mode::LayoutName(name) => {
+            Mode::LayoutName { name, .. } => {
                 let room = MAX_LAYOUT_NAME.saturating_sub(name.chars().count());
                 name.extend(text.chars().filter(|c| !c.is_control()).take(room));
             }
@@ -1165,9 +1176,16 @@ impl App {
                 }
                 self.mode = Mode::Normal;
             }
-            Mode::LayoutName(name) => match key.code {
+            Mode::LayoutName { name, rename } => match key.code {
                 KeyCode::Esc => self.mode = Mode::Normal,
                 KeyCode::Char('c') if ctrl => self.mode = Mode::Normal,
+                KeyCode::Enter if !name.trim().is_empty() && rename.is_some() => {
+                    let (from, to) = (rename.take().unwrap_or_default(), name.trim().to_string());
+                    if from != to {
+                        self.request = Some(Request::RenameLayout { from, to });
+                    }
+                    self.mode = Mode::Normal;
+                }
                 KeyCode::Enter if !name.trim().is_empty() => {
                     let columns = self
                         .columns
@@ -1809,7 +1827,7 @@ mod tests {
         app.on_key(ch('a'));
         // An empty name isn't accepted; Esc cancels.
         app.on_key(key(KeyCode::Enter));
-        assert!(matches!(&app.mode, Mode::LayoutName(n) if n.is_empty()));
+        assert!(matches!(&app.mode, Mode::LayoutName { name, rename: None } if name.is_empty()));
         for c in " opx".chars() {
             app.on_key(ch(c));
         }
@@ -1851,6 +1869,28 @@ mod tests {
         app.on_key(ch(' '));
         assert_eq!(columns(&app), ["web1/db1"]);
         assert!(app.status.as_ref().is_some_and(|s| s.error));
+    }
+
+    #[test]
+    fn r_renames_a_layout() {
+        let mut app = app();
+        app.set_layouts(vec![layout()], None);
+        app.on_key(ch('['));
+        app.on_key(ch('r'));
+        assert!(matches!(&app.mode, Mode::LayoutName { name, rename: Some(r) } if name == "ops" && r == "ops"));
+        // The same name changes nothing.
+        app.on_key(key(KeyCode::Enter));
+        assert!(matches!(app.mode, Mode::Normal) && app.request.is_none());
+        app.on_key(ch('r'));
+        for _ in 0..3 {
+            app.on_key(key(KeyCode::Backspace));
+        }
+        app.on_key(key(KeyCode::Enter));
+        assert!(matches!(app.mode, Mode::LayoutName { .. }));
+        app.on_paste("prod ");
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!(app.request.take(), Some(Request::RenameLayout { from: "ops".into(), to: "prod".into() }));
+        assert!(matches!(app.mode, Mode::Normal));
     }
 
     #[test]
