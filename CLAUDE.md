@@ -26,6 +26,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `ssh -G` (applies ssh_config) and looks it up by `user@hostname:port`; on a match, passes args
   untouched. If it's not saved and the session is interactive, opens the wizard (`SSHH_NO_WIZARD=1`
   disables it). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
+  `HostData::tmux_session`: `with_tmux` adds `-t` + `model::tmux_command` (remote
+  `tmux new-session -A`) only for interactive shells (`SshInvocation::interactive_shell`, a tty in
+  wrapper mode); never in tool_args (sftp, ssh-copy-id) nor in the generated include file.
 - `db`: SQLite + migrations via `PRAGMA user_version` (append to `MIGRATIONS`, never edit existing ones).
 - `tui`: `sshh` without args, and the wizard. Lazygit-style layout: search + list + details on the
   left, terminal columns on the right. `App::columns: Vec<Vec<SessionKey>>` = columns left to right,

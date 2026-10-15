@@ -56,10 +56,12 @@ CREATE TABLE layout_panes (
     sftp      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (layout_id, col, row)
 );
+"#, r#"
+ALTER TABLE hosts ADD COLUMN tmux_session TEXT;
 "#];
 
 const HOST_SELECT: &str = "
-SELECT h.id, h.alias, h.hostname, h.user, h.port, h.identity_file, h.proxy_jump,
+SELECT h.id, h.alias, h.hostname, h.user, h.port, h.identity_file, h.proxy_jump, h.tmux_session,
        h.extra_options, h.name, h.description, h.notes, h.created_at, h.updated_at,
        (SELECT MAX(connected_at) FROM history WHERE host_id = h.id) AS last_used,
        (SELECT COUNT(*) FROM history WHERE host_id = h.id) AS use_count
@@ -343,8 +345,9 @@ fn insert_in(conn: &Connection, data: &HostData) -> Result<i64> {
     let now = now();
     let inserted = conn.execute(
         "INSERT INTO hosts (alias, hostname, user, port, identity_file, proxy_jump,
-                            extra_options, name, description, notes, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+                            extra_options, name, description, notes, created_at, updated_at,
+                            tmux_session)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12)",
         params![
             data.alias,
             data.hostname,
@@ -357,6 +360,7 @@ fn insert_in(conn: &Connection, data: &HostData) -> Result<i64> {
             data.description,
             data.notes,
             now,
+            data.tmux_session,
         ],
     );
     check_alias_conflict(inserted, &data.alias)?;
@@ -370,7 +374,7 @@ fn update_in(conn: &Connection, id: i64, data: &HostData) -> Result<()> {
     let updated = conn.execute(
         "UPDATE hosts SET alias = ?2, hostname = ?3, user = ?4, port = ?5, identity_file = ?6,
                           proxy_jump = ?7, extra_options = ?8, name = ?9, description = ?10,
-                          notes = ?11, updated_at = ?12
+                          notes = ?11, updated_at = ?12, tmux_session = ?13
          WHERE id = ?1",
         params![
             id,
@@ -385,6 +389,7 @@ fn update_in(conn: &Connection, id: i64, data: &HostData) -> Result<()> {
             data.description,
             data.notes,
             now(),
+            data.tmux_session,
         ],
     );
     if check_alias_conflict(updated, &data.alias)? == 0 {
@@ -485,6 +490,7 @@ fn host_from_row(row: &Row) -> rusqlite::Result<Host> {
             port: row.get("port")?,
             identity_file: row.get("identity_file")?,
             proxy_jump: row.get("proxy_jump")?,
+            tmux_session: row.get("tmux_session")?,
             extra_options,
             name: row.get("name")?,
             description: row.get("description")?,
@@ -515,6 +521,7 @@ mod tests {
             alias: alias.into(),
             hostname: "10.0.0.1".into(),
             user: Some("root".into()),
+            tmux_session: Some("ops".into()),
             extra_options: vec![SshOption { key: "ForwardAgent".into(), value: "yes".into() }],
             tags: vec!["prod".into(), "db".into()],
             ..Default::default()
@@ -529,6 +536,7 @@ mod tests {
         let host = db.find_by_alias("db1").unwrap().unwrap();
         assert_eq!(host.data.tags, ["db", "prod"]);
         assert_eq!(host.data.extra_options.len(), 1);
+        assert_eq!(host.data.tmux_session.as_deref(), Some("ops"));
         assert_eq!(host.use_count, 0);
 
         assert!(db.find_by_target("10.0.0.1", "root", 22, "me").unwrap().is_some());

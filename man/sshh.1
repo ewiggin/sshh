@@ -415,6 +415,9 @@ The same form adds, edits and saves new connections in the wizard.
 are required.
 Tags are separated by commas or spaces; extra options go one per line as
 .IR Key=Value .
+.B tmux
+is the remote tmux session to attach to (see
+.BR "PERSISTENT SESSIONS" ).
 .TP
 .BR Tab ", " Shift\-Tab ", " Down ", " Up
 Next or previous field (in multiline fields the arrows move between
@@ -434,6 +437,40 @@ or
 .TP
 .B Esc
 Cancel (in the wizard: connect without saving).
+.SH PERSISTENT SESSIONS
+Sessions live inside
+.BR sshh :
+closing it, or losing the network, ends them.
+A connection with a
+.B tmux
+session name runs, in interactive connections,
+.PP
+.RS
+.B "ssh \-t" ... \fIalias\fR \(aqtmux new\-session \-A \-s \fIname\fR || exec $SHELL \-l\(aq
+.RE
+.PP
+which attaches to that remote tmux session, creating it the first time, so
+the shell survives
+.B sshh
+and reopening the connection (or a layout) returns to it.
+tmux keeps one server per remote user: sessions only clash when several
+people log in as the same user, so use a name of your own.
+It applies to embedded sessions,
+.BR f ,
+.B yy
+and
+.BI "sshh " alias
+in a terminal, but not with a remote command,
+.BR \-N ,
+.BR \-T ,
+.BR \-W ,
+.BR \-s ,
+.BR \-f ,
+a
+.B RemoteCommand
+option or without a terminal, nor to sftp or the generated ssh_config file.
+Without tmux on the server, a login shell is opened instead.
+Scrollback is tmux's, not history mode.
 .SH SUBCOMMANDS
 .TP
 .B ls
@@ -450,6 +487,9 @@ Options:
 .BI \-p " port" ,
 .BI \-i " identity" ,
 .BI \-J " jump" ,
+.BI \-\-tmux " name"
+(see
+.BR "PERSISTENT SESSIONS" ),
 .BI \-o " Key=Value"
 (repeatable),
 .BI \-n " name" ,

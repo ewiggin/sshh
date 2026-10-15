@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
 use super::ui::{ACCENT, block};
-use crate::model::{HostData, SshOption, validate_alias};
+use crate::model::{HostData, SshOption, validate_alias, validate_tmux_session};
 use crate::ssh_args::parse_option;
 
 pub const ALIAS: usize = 0;
@@ -17,20 +17,22 @@ pub const USER: usize = 2;
 pub const PORT: usize = 3;
 pub const IDENTITY: usize = 4;
 pub const JUMP: usize = 5;
-pub const NAME: usize = 6;
-pub const DESCRIPTION: usize = 7;
-pub const TAGS: usize = 8;
-pub const OPTIONS: usize = 9;
-pub const NOTES: usize = 10;
+pub const TMUX: usize = 6;
+pub const NAME: usize = 7;
+pub const DESCRIPTION: usize = 8;
+pub const TAGS: usize = 9;
+pub const OPTIONS: usize = 10;
+pub const NOTES: usize = 11;
 
 /// (label, hint when empty, lines; >1 = multiline)
-const FIELDS: [(&str, &str, u16); 11] = [
+const FIELDS: [(&str, &str, u16); 12] = [
     ("Alias", "short name to use with: sshh <alias>", 1),
     ("Host", "hostname or IP", 1),
     ("User", "", 1),
     ("Port", "22 by default", 1),
     ("Identity", "e.g. ~/.ssh/id_ed25519", 1),
     ("ProxyJump", "e.g. bastion or user@host:port", 1),
+    ("tmux", "remote session to keep the shell alive, e.g. your name", 1),
     ("Name", "", 1),
     ("Description", "", 1),
     ("Tags", "e.g. prod, web", 1),
@@ -153,6 +155,7 @@ impl Form {
         fields[PORT] = Field::new(data.port.map(|p| p.to_string()).unwrap_or_default());
         fields[IDENTITY] = Field::new(opt(&data.identity_file));
         fields[JUMP] = Field::new(opt(&data.proxy_jump));
+        fields[TMUX] = Field::new(opt(&data.tmux_session));
         fields[NAME] = Field::new(opt(&data.name));
         fields[DESCRIPTION] = Field::new(opt(&data.description));
         fields[TAGS] = Field::new(data.tags.join(", "));
@@ -205,6 +208,10 @@ impl Form {
                 _ => return Err((PORT, format!("invalid port '{p}'"))),
             },
         };
+        let tmux_session = optional(TMUX);
+        if let Some(name) = &tmux_session {
+            validate_tmux_session(name).map_err(|e| (TMUX, e.to_string()))?;
+        }
         let tags = text(TAGS)
             .split(|c: char| c == ',' || c.is_whitespace())
             .map(|t| t.trim_start_matches('#'))
@@ -226,6 +233,7 @@ impl Form {
             port,
             identity_file: optional(IDENTITY),
             proxy_jump: optional(JUMP),
+            tmux_session,
             extra_options,
             name: optional(NAME),
             description: optional(DESCRIPTION),

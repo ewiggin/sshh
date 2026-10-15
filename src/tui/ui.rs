@@ -356,6 +356,9 @@ fn draw_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     if let Some(jump) = &d.proxy_jump {
         lines.push(field("Jump", jump.clone()));
     }
+    if let Some(tmux) = &d.tmux_session {
+        lines.push(field("tmux", tmux.clone()));
+    }
     for opt in &d.extra_options {
         lines.push(field("Option", format!("{} {}", opt.key, opt.value)));
     }

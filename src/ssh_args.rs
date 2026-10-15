@@ -130,6 +130,10 @@ pub struct SshInvocation {
     pub options: Vec<(String, String)>,
     /// The call doesn't open a session (`-G`, `-V`, `-O`, `-Q`): it only queries.
     pub info_only: bool,
+    /// There is a remote command after the destination.
+    pub command: bool,
+    /// A flag rules out an interactive shell: `-N`, `-s`, `-W`, `-f`, `-T`.
+    pub no_shell: bool,
 }
 
 impl SshInvocation {
@@ -156,6 +160,20 @@ impl SshInvocation {
             .or_else(|| self.option("Port").and_then(|p| p.parse().ok()))
     }
 
+    /// Whether ssh will open an interactive shell (no command, subsystem,
+    /// forwarding only or disabled tty).
+    pub fn interactive_shell(&self) -> bool {
+        let is = |key: &str, values: &[&str]| {
+            self.option(key).is_some_and(|v| values.iter().any(|x| v.eq_ignore_ascii_case(x)))
+        };
+        !self.info_only
+            && !self.command
+            && !self.no_shell
+            && self.option("RemoteCommand").is_none()
+            && !is("RequestTTY", &["no", "false"])
+            && !is("SessionType", &["none", "subsystem"])
+    }
+
     /// Whether the user already set option `key` on the command line.
     pub fn sets(&self, key: &str) -> bool {
         match key.to_ascii_lowercase().as_str() {
@@ -174,6 +192,7 @@ impl SshInvocation {
             'i' => self.identities.push(value),
             'J' => self.jump = Some(value),
             'o' => self.options.extend(parse_option(&value)),
+            'W' => self.no_shell = true,
             _ => {}
         }
         Ok(())
@@ -199,6 +218,9 @@ pub fn parse(args: &[String]) -> Result<SshInvocation, ParseError> {
                 && let Some(next) = args.get(i + 1)
             {
                 inv.set_destination(i + 1, next)?;
+                inv.command = args.len() > i + 2;
+            } else {
+                inv.command = args.len() > i + 1;
             }
             break;
         }
@@ -206,6 +228,9 @@ pub fn parse(args: &[String]) -> Result<SshInvocation, ParseError> {
             for (pos, c) in flags.char_indices() {
                 if matches!(c, 'G' | 'V' | 'O' | 'Q') {
                     inv.info_only = true;
+                }
+                if matches!(c, 'N' | 's' | 'f' | 'T') {
+                    inv.no_shell = true;
                 }
                 if FLAGS_NO_ARG.contains(c) {
                     continue;
@@ -228,6 +253,7 @@ pub fn parse(args: &[String]) -> Result<SshInvocation, ParseError> {
         }
         if inv.destination.is_some() {
             // The remote command starts here.
+            inv.command = true;
             break;
         }
         inv.set_destination(i, arg)?;
@@ -239,6 +265,24 @@ pub fn parse(args: &[String]) -> Result<SshInvocation, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_interactive_shells() {
+        let shell = |s: &str| parse(&args(s)).unwrap().interactive_shell();
+        assert!(shell("web"));
+        assert!(shell("-t -p 22 web"));
+        assert!(shell("-- web"));
+        assert!(!shell("web ls"));
+        assert!(!shell("-- web ls"));
+        assert!(!shell("web -- ls"));
+        assert!(!shell("-N -L 80:h:80 web"));
+        assert!(!shell("-Tv web"));
+        assert!(!shell("-s web sftp"));
+        assert!(!shell("-W h:22 web"));
+        assert!(!shell("-G web"));
+        assert!(!shell("-o RequestTTY=no web"));
+        assert!(!shell("-o RemoteCommand=top web"));
+    }
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()

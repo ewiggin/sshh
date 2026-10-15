@@ -99,6 +99,9 @@ struct AddArgs {
     /// ProxyJump
     #[arg(short = 'J', long)]
     jump: Option<String>,
+    /// Remote tmux session to attach to (created if needed) in interactive sessions
+    #[arg(long, value_name = "NAME")]
+    tmux: Option<String>,
     /// Extra ssh_config option (Key=Value); can be repeated
     #[arg(short = 'o', long = "option", value_parser = parse_option_arg)]
     options: Vec<SshOption>,
@@ -233,6 +236,7 @@ fn add(args: AddArgs) -> Result<()> {
         port: args.port.or(dest.port),
         identity_file: args.identity,
         proxy_jump: args.jump,
+        tmux_session: args.tmux,
         extra_options: args.options,
         name: args.name,
         description: args.description,

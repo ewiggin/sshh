@@ -15,7 +15,7 @@ use std::{env, fs};
 use anyhow::{Context, Result, anyhow};
 
 use crate::db::Db;
-use crate::model::{Host, HostData, config_value, validate_alias};
+use crate::model::{Host, HostData, config_value, tmux_command, validate_alias};
 use crate::ssh_args::{self, Destination, SshInvocation};
 use crate::tui::{self, WizardOutcome};
 
@@ -72,7 +72,12 @@ fn prepare(
     let (host_id, final_args) = match resolve(&db, args, inv, dest)? {
         Resolution::Alias(host) => {
             debug(format_args!("'{}' is the alias of a saved connection", dest.host));
-            (host.id, alias_args(args, dest_index, inv, &host))
+            let mut final_args = alias_args(args, dest_index, inv, &host);
+            // A tty is needed for tmux; without one (scripts, pipes) ssh runs as usual.
+            if std::io::stdin().is_terminal() {
+                final_args = with_tmux(final_args, inv, &host.data);
+            }
+            (host.id, final_args)
         }
         Resolution::Target(host) => {
             debug(format_args!("'{dest}' matches saved connection '{}'", host.data.alias));
@@ -191,7 +196,7 @@ fn suggest_alias(host: &str) -> String {
 /// ssh binary and arguments to connect to a saved connection from the TUI
 /// (embedded session or full screen). Records the connection in the history.
 pub fn session_command(db: &Db, host: &Host) -> Result<(PathBuf, Vec<String>)> {
-    let args = tool_args(host);
+    let args = with_tmux(tool_args(host), &SshInvocation::default(), &host.data);
     if let Err(e) = db.record_connection(host.id, std::slice::from_ref(&host.data.alias)) {
         debug(format_args!("could not save history: {e:#}"));
     }
@@ -220,10 +225,14 @@ pub fn ssh_command(d: &HostData) -> String {
     for opt in &d.extra_options {
         parts.extend(["-o".to_string(), format!("{}={}", opt.key, opt.value)]);
     }
+    if d.tmux_session.is_some() {
+        parts.insert(1, "-t".into());
+    }
     parts.push(match &d.user {
         Some(user) => format!("{user}@{}", d.hostname),
         None => d.hostname.clone(),
     });
+    parts.extend(d.tmux_session.as_deref().map(tmux_command));
     parts.iter().map(|p| shell_quote(p)).collect::<Vec<_>>().join(" ")
 }
 
@@ -245,6 +254,22 @@ fn alias_args(args: &[String], dest_index: usize, inv: &SshInvocation, host: &Ho
     }
     out.extend_from_slice(&args[at..]);
     out
+}
+
+/// If the connection has a tmux session and ssh is going to open an
+/// interactive shell, asks for a tty (`-t`, first) and attaches to the
+/// session instead (remote command, last). `args` must have no remote command.
+fn with_tmux(mut args: Vec<String>, inv: &SshInvocation, data: &HostData) -> Vec<String> {
+    let Some(name) = &data.tmux_session else { return args };
+    let own_command = data.extra_options.iter().any(|o| o.key.eq_ignore_ascii_case("RemoteCommand"));
+    if !inv.interactive_shell() || own_command {
+        debug(format_args!("not an interactive shell; tmux session '{name}' not used"));
+        return args;
+    }
+    debug(format_args!("attaching to tmux session '{name}'"));
+    args.insert(0, "-t".into());
+    args.push(tmux_command(name));
+    args
 }
 
 /// Replaces the current process with `ssh`.
@@ -374,6 +399,25 @@ mod tests {
         assert_eq!(shell_quote("IdentityFile=\"~/a b\""), "'IdentityFile=\"~/a b\"'");
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
         assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn tmux_session_only_for_interactive_shells() {
+        let data = HostData { tmux_session: Some("mario".into()), ..host().data };
+        let tmux = |cmd: &str| {
+            let args: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+            with_tmux(args.clone(), &ssh_args::parse(&args).unwrap(), &data).join(" ")
+        };
+        assert_eq!(tmux("-v web"), "-t -v web tmux new-session -A -s mario || exec $SHELL -l");
+        assert_eq!(tmux("web uptime"), "web uptime");
+        assert_eq!(tmux("-N -L 1:h:1 web"), "-N -L 1:h:1 web");
+        let mut own = data.clone();
+        own.extra_options.push(crate::model::SshOption { key: "remotecommand".into(), value: "top".into() });
+        assert_eq!(with_tmux(vec!["web".into()], &SshInvocation::default(), &own), ["web"]);
+        assert_eq!(
+            ssh_command(&data),
+            "ssh -t -p 2222 -i '~/.ssh/my key' deploy@10.0.0.5 'tmux new-session -A -s mario || exec $SHELL -l'"
+        );
     }
 
     #[test]

@@ -22,6 +22,10 @@ pub struct HostData {
     pub identity_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy_jump: Option<String>,
+    /// Remote tmux session to attach to (or create) in interactive sessions,
+    /// so that it survives sshh and the network.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extra_options: Vec<SshOption>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,6 +46,9 @@ impl HostData {
         }
         if self.port == Some(0) {
             bail!("port cannot be 0");
+        }
+        if let Some(name) = &self.tmux_session {
+            validate_tmux_session(name)?;
         }
         Ok(())
     }
@@ -122,6 +129,24 @@ pub struct Host {
 /// sshh's own subcommands; they cannot be used as aliases.
 pub const RESERVED_ALIASES: &[&str] =
     &["ls", "add", "rm", "help", "history", "export", "import", "import-ssh-config", "ssh-config"];
+
+/// tmux session names: letters, digits, `-` and `_`, so they need no quoting
+/// in the remote command (tmux itself rejects `:` and `.`).
+pub fn validate_tmux_session(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("tmux session cannot be empty");
+    }
+    if let Some(c) = name.chars().find(|c| !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_')) {
+        bail!("tmux session cannot contain '{c}' (use letters, digits, '-' and '_')");
+    }
+    Ok(())
+}
+
+/// Remote command that attaches to the tmux session `name`, creating it if
+/// needed. Without tmux on the server it falls back to a login shell.
+pub fn tmux_command(name: &str) -> String {
+    format!("tmux new-session -A -s {name} || exec $SHELL -l")
+}
 
 pub fn validate_alias(alias: &str) -> Result<()> {
     if alias.is_empty() {

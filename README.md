@@ -25,6 +25,7 @@ SSH connection manager for the terminal, written in Rust.
 - [New connection wizard](#new-connection-wizard)
 - [TUI](#tui)
 - [Connection form](#connection-form)
+- [Persistent sessions (tmux)](#persistent-sessions-tmux)
 - [Subcommands](#subcommands)
 - [Importing `~/.ssh/config`](#importing-sshconfig)
 - [Export and import (JSON)](#export-and-import-json)
@@ -376,6 +377,7 @@ The same form is used to add (`a`), edit (`e`, `t`) and in the wizard.
 | User, Port | Optional. Empty = whatever ssh decides (local user, 22). |
 | Identity | Path to the key (`IdentityFile`). |
 | ProxyJump | `bastion` or `user@host:port`. |
+| tmux | Remote tmux session to attach to, see [persistent sessions](#persistent-sessions-tmux). Letters, digits, `-` and `_`. |
 | Name, Description | Free text to identify it. |
 | Tags | Separated by commas or spaces; the leading `#` is optional. |
 | Options | Extra ssh_config options, one per line: `ForwardAgent=yes`. |
@@ -393,6 +395,28 @@ The same form is used to add (`a`), edit (`e`, `t`) and in the wizard.
 
 If a value is invalid (wrong port, duplicate alias…), focus jumps to that field and the error is shown
 in red.
+
+## Persistent sessions (tmux)
+
+Sessions live inside `sshh`: closing it (or losing the network) ends them. To keep the shell alive,
+give the connection a **tmux session** name (form field `tmux`, or `sshh add --tmux <name>`). Every
+interactive connection then runs
+
+```sh
+ssh -t … web 'tmux new-session -A -s <name> || exec $SHELL -l'
+```
+
+which attaches to that remote tmux session, creating it the first time. Close `sshh`, open it again
+(or open a [layout](#keyboard)) and you are back where you left off. tmux keeps one server per remote
+user, so sessions only clash when several people log in as the same user (`root`, `deploy`…): use a
+name of your own, like your name. Detach with tmux's `Ctrl-b d` to leave it running.
+
+- It applies to the embedded sessions, `f` (full screen), `yy` and `sshh <alias>` in a terminal, but
+  not when there is a remote command (`sshh web uptime`), with `-N`, `-T`, `-W`, `-s`, `-f`, a
+  `RemoteCommand` option or no terminal (scripts, pipes), nor to sftp, scp or the generated ssh_config
+  file.
+- If the server has no tmux, you get a plain login shell.
+- Scrollback is tmux's (`Ctrl-b [`), not `sshh`'s history mode, since tmux redraws the screen.
 
 ## Subcommands
 
@@ -417,6 +441,7 @@ sshh --help                                  # help (also `sshh <subcommand> --h
 | `-p, --port <PORT>` | port |
 | `-i, --identity <PATH>` | key (`IdentityFile`) |
 | `-J, --jump <DESTINATION>` | ProxyJump |
+| `--tmux <NAME>` | remote tmux session to attach to ([persistent sessions](#persistent-sessions-tmux)) |
 | `-o, --option <Key=Value>` | extra ssh_config option (repeatable) |
 | `-n, --name <TEXT>` | name |
 | `-d, --description <TEXT>` | description |
