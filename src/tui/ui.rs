@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap};
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use super::app::{App, Focus, ListTab, Mode, Pane, SessionKey, SessionKind, SessionState};
+use super::app::{App, Focus, ListTab, MIN_COLUMN_WIDTH, Mode, Pane, SessionKey, SessionKind, SessionState};
 use super::session::Session;
 use crate::cli::{format_date, relative_time, short_age};
 use crate::connect::shell_quote;
@@ -28,6 +28,10 @@ const TAG: Color = Color::Magenta;
 const CONNECTED: Color = Color::Green;
 const BROADCAST: Color = Color::Red;
 
+/// Below this width the list goes on top and the panes below it (lazygit's
+/// portrait mode).
+const PORTRAIT_WIDTH: u16 = 100;
+
 pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Session>) {
     let [main, footer] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
@@ -40,15 +44,35 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
         app.columns_area = main;
         draw_pane(frame, app, sessions, (app.active_column, app.active_row), main);
     } else {
-        let left_width = (main.width * 24 / 100).clamp(24, 40).min(main.width);
-        let [left, right] =
-            Layout::horizontal([Constraint::Length(left_width), Constraint::Fill(1)]).areas(main);
-        let [search, list, detail] = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Percentage(55),
-            Constraint::Fill(1),
-        ])
-        .areas(left);
+        app.portrait = main.width < PORTRAIT_WIDTH;
+        let (search, list, detail, right) = if app.portrait {
+            // Search on top, then the list and the details side by side, then
+            // the panes.
+            app.columns_room = 0;
+            let top_height = (main.height * 2 / 5).max(10).min(main.height);
+            let [top, right] =
+                Layout::vertical([Constraint::Length(top_height), Constraint::Fill(1)]).areas(main);
+            let [search, rest] = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(top);
+            let [list, detail] =
+                Layout::horizontal([Constraint::Percentage(55), Constraint::Fill(1)]).areas(rest);
+            (search, list, detail, right)
+        } else {
+            // Like lazygit, the side takes a third of the width; every extra
+            // column takes some of it (a quarter, a fifth…), down to a minimum.
+            let min_width = (main.width * 24 / 100).clamp(24, 40).min(main.width);
+            let share = main.width / (app.columns.len().max(1) as u16 + 2);
+            let left_width = share.max(min_width);
+            app.columns_room = main.width - min_width;
+            let [left, right] =
+                Layout::horizontal([Constraint::Length(left_width), Constraint::Fill(1)]).areas(main);
+            let [search, list, detail] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Percentage(55),
+                Constraint::Fill(1),
+            ])
+            .areas(left);
+            (search, list, detail, right)
+        };
         draw_search(frame, app, search);
         draw_list(frame, app, list);
         draw_detail(frame, app, detail);
@@ -423,6 +447,18 @@ fn draw_columns(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey,
     app.columns_area = area;
     if app.columns.is_empty() {
         draw_overview(frame, app, area);
+        return;
+    }
+    // In portrait mode, or when the columns don't fit side by side, every
+    // pane goes under the previous one.
+    app.stacked = app.portrait || usize::from(area.width) < app.columns.len() * usize::from(MIN_COLUMN_WIDTH);
+    if app.stacked {
+        let panes: Vec<Pane> =
+            app.columns.iter().enumerate().flat_map(|(c, panes)| (0..panes.len()).map(move |r| (c, r))).collect();
+        let rects = Layout::vertical(vec![Constraint::Fill(1); panes.len()]).split(area);
+        for (pane, rect) in panes.into_iter().zip(rects.iter()) {
+            draw_pane(frame, app, sessions, pane, *rect);
+        }
         return;
     }
     let columns = Layout::horizontal(vec![Constraint::Fill(1); app.columns.len()]).split(area);

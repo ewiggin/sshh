@@ -35,7 +35,11 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   each a stack of panes top to bottom; `active_column`/`active_row`, `pane_areas` (by `Pane` =
   (column, row)). Each `SessionKey` is a connection
   id + `SessionKind` (Ssh / Sftp): a connection can have both; `App::host_session` aggregates them,
-  `zoomed` = full screen). The list is "column 0" for Alt-h/l. Requests that target a session carry
+  `zoomed` = full screen). The list is "column 0" for Alt-h/l.
+  Sizes: left side = width / (columns + 2), at least the old 24% (24..40), and `App::columns_room`
+  (width with the list at that minimum) is what `max_columns` uses; under `ui::PORTRAIT_WIDTH` `App::portrait` (list on top, panes
+  below, limited by `stacked_capacity`); `App::stacked` = panes drawn one under the other (portrait
+  or columns narrower than `MIN_COLUMN_WIDTH`), Alt-j/k then walk them all (`focus_stacked`). Requests that target a session carry
   its id (`Input`, `Paste`, `Scroll`); the loop resizes each session to its `App::pane_areas` rect.
   `app.rs` = state + events (testable without a terminal); side effects (DB, clipboard, $EDITOR,
   sessions) are requested through `App::request` and run by `mod.rs`, which owns the sessions and

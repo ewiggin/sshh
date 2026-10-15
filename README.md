@@ -214,6 +214,13 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
   the session ended); next to it (unless the session is alive), the time since the last connection, lazygit style (`5m`, `2d`,
   `3w`, `1M`, `1y`). Closing a column doesn't close its session. With no column open, the right side
   shows the actions and latest connections of the selected connection.
+- **Sizes**: like lazygit, the left side takes a third of the width, and it gets narrower as columns
+  are added (a quarter with two, a fifth with three…) down to 24% of the width (24 to 40 characters),
+  which is what limits how many columns fit. On a narrow terminal (under 100
+  columns) the layout goes vertical: search on top, the list and the details side by side, and the
+  panes below, one under the other (as many as fit, at least 6 lines each). The panes also go one
+  under the other when the columns don't fit side by side (at least 40 characters each). Then
+  `Alt-j` / `Alt-k` go through every pane in order and `Alt-h` goes back to the list.
 
 Each embedded session is the system `ssh` running inside a pseudo terminal, so everything works as in
 a normal terminal (passwords, host key prompts, agent, full-screen programs like `vim`, `less` or

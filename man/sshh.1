@@ -151,6 +151,17 @@ The right side shows
 .I terminal columns
 side by side, each with the embedded ssh session of one connection, or an
 overview of the selected connection when no column is open.
+The left side takes a third of the width and gets narrower as columns are
+added, down to 24% of the width (24 to 40 characters).
+Under 100 columns the layout goes vertical: the search box, then the list
+and the details side by side, then the panes one under the other (as many
+as fit, at least 6 lines each).
+The panes also go one under the other when the columns don't fit side by
+side; then
+.BR Alt\-j / Alt\-k
+go through every pane and
+.B Alt\-h
+goes back to the list.
 .PP
 Each embedded session is the system
 .B ssh

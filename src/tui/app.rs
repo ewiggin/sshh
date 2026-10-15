@@ -20,7 +20,7 @@ use crate::model::{Host, HostData};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Narrowest terminal column allowed when splitting.
-const MIN_COLUMN_WIDTH: u16 = 40;
+pub const MIN_COLUMN_WIDTH: u16 = 40;
 /// Shortest pane allowed when stacking panes in a column.
 const MIN_PANE_HEIGHT: u16 = 6;
 /// Columns reachable with Alt-1..Alt-9.
@@ -301,8 +301,17 @@ pub struct App {
     pub detail_area: Rect,
     /// Whole area for the terminal columns.
     pub columns_area: Rect,
+    /// Widest the columns can get, with the list at its minimum width (0
+    /// until the first render, or in portrait mode).
+    pub columns_room: u16,
     /// Inner area of every visible pane, by (column, row).
     pub pane_areas: Vec<(Pane, Rect)>,
+    /// Narrow screen: the list on top and the panes below it, one under the
+    /// other (set by the render).
+    pub portrait: bool,
+    /// The panes are drawn one under the other (portrait, or the columns
+    /// don't fit side by side), so Alt-j/k go through all of them.
+    pub stacked: bool,
     matcher: Matcher,
     last_click: Option<(usize, Instant)>,
 }
@@ -343,6 +352,9 @@ impl App {
             search_area: Rect::default(),
             detail_area: Rect::default(),
             columns_area: Rect::default(),
+            columns_room: 0,
+            portrait: false,
+            stacked: false,
             pane_areas: Vec::new(),
             matcher: Matcher::new(Config::DEFAULT),
             last_click: None,
@@ -421,6 +433,17 @@ impl App {
         }
     }
 
+    /// With the panes one under the other: focuses the next (or previous) one,
+    /// in order, column by column.
+    fn focus_stacked(&mut self, forward: bool) {
+        let panes: Vec<Pane> =
+            self.columns.iter().enumerate().flat_map(|(c, panes)| (0..panes.len()).map(move |r| (c, r))).collect();
+        let Some(index) = panes.iter().position(|&p| p == (self.active_column, self.active_row)) else { return };
+        let next = if forward { (index + 1).min(panes.len() - 1) } else { index.saturating_sub(1) };
+        let (column, row) = panes[next];
+        self.focus_pane(column, row);
+    }
+
     /// Focuses column `index`, keeping the active row if it has it.
     fn focus_column(&mut self, index: usize) {
         self.focus_pane(index, self.active_row);
@@ -473,7 +496,8 @@ impl App {
     }
 
     fn max_columns(&self) -> usize {
-        match self.columns_area.width {
+        // The list gets narrower as columns are added.
+        match self.columns_room.max(self.columns_area.width) {
             0 => MAX_COLUMNS,
             width => usize::from(width / MIN_COLUMN_WIDTH).clamp(1, MAX_COLUMNS),
         }
@@ -486,8 +510,38 @@ impl App {
         }
     }
 
+    /// In portrait mode every pane goes under the previous one: how many fit.
+    fn stacked_capacity(&self) -> Option<usize> {
+        self.portrait.then(|| match self.columns_area.height {
+            0 => MAX_COLUMNS,
+            height => usize::from(height / MIN_PANE_HEIGHT).clamp(1, MAX_COLUMNS),
+        })
+    }
+
+    fn total_panes(&self) -> usize {
+        self.columns.iter().map(Vec::len).sum()
+    }
+
+    fn room_for_column(&self) -> bool {
+        match self.stacked_capacity() {
+            Some(capacity) => self.total_panes() < capacity,
+            None => self.columns.len() < self.max_columns(),
+        }
+    }
+
+    fn room_for_pane(&self, column: usize) -> bool {
+        match self.stacked_capacity() {
+            Some(capacity) => self.total_panes() < capacity,
+            None => self.columns[column].len() < self.max_panes_per_column(),
+        }
+    }
+
     fn no_room_for_columns(&mut self) {
-        self.error(format!("No room for another column (at least {MIN_COLUMN_WIDTH} characters each)"));
+        if self.portrait {
+            self.no_room_for_panes();
+        } else {
+            self.error(format!("No room for another column (at least {MIN_COLUMN_WIDTH} characters each)"));
+        }
     }
 
     fn no_room_for_panes(&mut self) {
@@ -748,7 +802,10 @@ impl App {
             return;
         }
         let max_panes = self.max_panes_per_column();
-        let fits = columns.len() <= self.max_columns() && columns.iter().all(|panes| panes.len() <= max_panes);
+        let fits = match self.stacked_capacity() {
+            Some(capacity) => total <= capacity,
+            None => columns.len() <= self.max_columns() && columns.iter().all(|panes| panes.len() <= max_panes),
+        };
         if !fits {
             columns = self.grid(columns.into_iter().flatten().collect());
         }
@@ -840,7 +897,7 @@ impl App {
                 pane
             }
             None if new_column || self.columns.is_empty() => {
-                if self.columns.len() >= self.max_columns() {
+                if !self.room_for_column() {
                     self.no_room_for_columns();
                     return;
                 }
@@ -874,7 +931,7 @@ impl App {
             return;
         }
         let last = self.columns.len() - 1;
-        if self.columns[last].len() >= self.max_panes_per_column() {
+        if !self.room_for_pane(last) {
             self.no_room_for_panes();
             return;
         }
@@ -909,7 +966,13 @@ impl App {
 
     /// Arranges sessions in as many columns as fit, stacking the rest evenly.
     /// The ones that don't fit are left out.
+    /// In portrait mode, as many as fit, one per column (they are drawn one
+    /// under the other anyway).
     fn grid(&self, mut keys: Vec<SessionKey>) -> Vec<Vec<SessionKey>> {
+        if let Some(capacity) = self.stacked_capacity() {
+            keys.truncate(capacity);
+            return keys.into_iter().map(|key| vec![key]).collect();
+        }
         let max_columns = self.max_columns();
         keys.truncate(max_columns * self.max_panes_per_column());
         let (total, count) = (keys.len(), keys.len().min(max_columns));
@@ -956,7 +1019,9 @@ impl App {
         } else {
             return;
         };
-        if self.columns[target].len() >= self.max_panes_per_column() {
+        // Moving a pane doesn't change how many there are, which is what
+        // limits them in portrait mode.
+        if !self.portrait && self.columns[target].len() >= self.max_panes_per_column() {
             self.no_room_for_panes();
             return;
         }
@@ -978,7 +1043,8 @@ impl App {
         if self.columns.get(column).is_none_or(|panes| panes.len() < 2) {
             return;
         }
-        if self.columns.len() >= self.max_columns() {
+        let room = if self.portrait { self.columns.len() < MAX_COLUMNS } else { self.columns.len() < self.max_columns() };
+        if !room {
             self.no_room_for_columns();
             return;
         }
@@ -1037,6 +1103,16 @@ impl App {
         let in_terminal = self.focus == Focus::Terminal;
         let (column, row) = (self.active_column, self.active_row);
         match key.code {
+            // Panes one under the other: j/k (and l) go through all of them,
+            // h back to the list.
+            KeyCode::Char('j' | 'l') | KeyCode::Down | KeyCode::Right if in_terminal && self.stacked => {
+                self.focus_stacked(true);
+            }
+            KeyCode::Char('k') | KeyCode::Up if in_terminal && self.stacked => self.focus_stacked(false),
+            KeyCode::Char('h') | KeyCode::Left if in_terminal && self.stacked => {
+                self.focus = Focus::List;
+                self.zoomed = false;
+            }
             // Focus, like vim; the list is the leftmost column.
             KeyCode::Char('h') | KeyCode::Left if in_terminal && column > 0 => {
                 self.focus_pane(column - 1, row);
@@ -2138,6 +2214,48 @@ mod tests {
         app.on_key(alt('v'));
         app.request = None;
         app
+    }
+
+    #[test]
+    fn the_list_shrinks_to_make_room_for_columns() {
+        let mut app = app_with_two_columns();
+        // Two columns of 60 now, but the list can shrink to leave 160.
+        app.columns_area = Rect::new(80, 0, 120, 30);
+        assert_eq!(app.max_columns(), 3);
+        app.columns_room = 160;
+        assert_eq!(app.max_columns(), 4);
+    }
+
+    #[test]
+    fn portrait_stacks_the_panes_and_limits_them_by_height() {
+        let mut app = app_with_two_columns();
+        // Narrow and 12 lines high: room for two panes of 6 lines.
+        (app.portrait, app.stacked) = (true, true);
+        app.columns_area = Rect::new(0, 0, 80, 12);
+        // Alt-j/k go through every pane in order; Alt-h goes back to the list.
+        app.on_key(alt('k'));
+        assert_eq!((app.active_column, app.active_row), (0, 0));
+        app.on_key(alt('j'));
+        app.on_key(alt('j'));
+        assert_eq!((app.active_column, app.active_row), (1, 0));
+        app.on_key(alt('h'));
+        assert_eq!(app.focus, Focus::List);
+        // A third pane doesn't fit, whatever its width.
+        let web1 = app.entries.iter().position(|e| app.hosts[e.index].id == 1).unwrap();
+        app.select(web1);
+        app.on_key(alt('v'));
+        assert_eq!(columns(&app), ["db1", "dev"]);
+        assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("lines")));
+        // Moving panes around is fine: there are as many.
+        app.on_key(alt('l'));
+        app.on_key(alt('J'));
+        assert_eq!(columns(&app), ["dev/db1"]);
+        // A layout that doesn't fit is cut, one pane per column.
+        app.set_layouts(vec![layout()], None);
+        app.on_key(alt('h'));
+        app.on_key(ch('['));
+        app.on_key(ch(' '));
+        assert_eq!(columns(&app), ["web1", "db1"]);
     }
 
     #[test]
