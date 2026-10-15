@@ -622,6 +622,17 @@ fn draw_pane(
         .cursor(Cursor::default().visibility(show_cursor));
     frame.render_widget(terminal, area);
 
+    // Text selected with the mouse.
+    if let Some(selection) = app.selection.filter(|s| s.key == key) {
+        let inner = Block::bordered().inner(area);
+        for row in 0..inner.height {
+            if let Some((from, to)) = selection.columns(row, inner.width) {
+                let rect = Rect { x: inner.x + from, y: inner.y + row, width: to - from, height: 1 };
+                frame.buffer_mut().set_style(rect, Style::new().add_modifier(Modifier::REVERSED));
+            }
+        }
+    }
+
     // History mode: highlight the cursor line or the selection.
     if let Some(copy) = copy {
         let inner = Block::bordered().inner(area);

@@ -223,6 +223,8 @@ a normal terminal (passwords, host key prompts, agent, full-screen programs like
   modes…), so programs like `fish` or `neovim` start without waiting for a timeout.
 - Programs that use the mouse (`htop`, `vim` with `mouse=a`, `mc`…) receive clicks, drags and the
   wheel over their column. Hold `Shift` to select text with your terminal instead.
+- Drag over a column to **select text and copy it** to the clipboard when you release the button:
+  only that pane's text, without borders or other columns.
 - It's resized with its column, keeps 5000 lines of history (mouse wheel, or `Alt-s` for history
   mode) and accepts pastes.
 
@@ -360,6 +362,7 @@ filtered while you type and matching letters are highlighted.
 | Click on a row | select (a tag in the Tags tab; double click filters by it; in the Layouts tab it opens the layout) |
 | Double click | open the session (like `Space`) |
 | Click on a column | focus it |
+| Drag over a column | select its text; releasing copies it to the clipboard (highlighted until the next click or key) |
 | Wheel | move · scroll the details · scroll back the history of the column under the pointer |
 | Click, drag, wheel on a program that uses the mouse | sent to that program (`Shift` to select text natively) |
 | Click on the search box | search |

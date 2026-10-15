@@ -337,6 +337,15 @@ fn handle_request(
                 }
             }
         }
+        Request::CopySelection(id, start, end) => {
+            let text = sessions.get(&id).map(|s| s.text_between(start, end)).unwrap_or_default();
+            if !text.is_empty() {
+                match term::copy(&text) {
+                    Ok(()) => app.info(format!("Copied {} characters", text.chars().count())),
+                    Err(e) => app.error(format!("Could not copy: {e:#}")),
+                }
+            }
+        }
         Request::Mouse(id, event) => {
             if let Some(session) = sessions.get_mut(&id) {
                 session.send_mouse(event);

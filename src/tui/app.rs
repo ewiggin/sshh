@@ -105,11 +105,43 @@ pub enum Request {
     StartHistory(SessionKey),
     /// Key for a session in history mode.
     HistoryKey(SessionKey, KeyEvent),
+    /// Copy the text of a session's screen between two cells (row, column),
+    /// both included, in reading order.
+    CopySelection(SessionKey, (u16, u16), (u16, u16)),
     External { program: External, host: Box<Host> },
 }
 
 /// A pane of the terminal columns: (column, row inside the column).
 pub type Pane = (usize, usize);
+
+/// Text selected with the mouse in a pane, in cells (row, column) of its
+/// session screen. It stays highlighted until the next click or key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MouseSelection {
+    pub key: SessionKey,
+    pub anchor: (u16, u16),
+    pub head: (u16, u16),
+    /// The button was released (and the text copied).
+    pub done: bool,
+}
+
+impl MouseSelection {
+    /// First and last cell, in reading order.
+    pub fn bounds(&self) -> ((u16, u16), (u16, u16)) {
+        (self.anchor.min(self.head), self.anchor.max(self.head))
+    }
+
+    /// Columns selected in screen row `row` (end excluded), out of `width`.
+    pub fn columns(&self, row: u16, width: u16) -> Option<(u16, u16)> {
+        let ((r0, c0), (r1, c1)) = self.bounds();
+        if !(r0..=r1).contains(&row) {
+            return None;
+        }
+        let from = if row == r0 { c0 } else { 0 };
+        let to = if row == r1 { c1 + 1 } else { width };
+        (from < to.min(width)).then_some((from, to.min(width)))
+    }
+}
 
 /// State of the embedded session of a connection, kept in sync by the main loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +283,8 @@ pub struct App {
     pub mouse_sessions: HashSet<SessionKey>,
     /// Sessions in history mode (kept in sync by the main loop).
     pub history_sessions: HashSet<SessionKey>,
+    /// Text being (or just) selected with the mouse in a pane.
+    pub selection: Option<MouseSelection>,
     /// Terminal columns, left to right; each one is a stack of panes (sessions),
     /// top to bottom.
     pub columns: Vec<Vec<SessionKey>>,
@@ -299,6 +333,7 @@ impl App {
             sessions: HashMap::new(),
             mouse_sessions: HashSet::new(),
             history_sessions: HashSet::new(),
+            selection: None,
             columns: Vec::new(),
             active_column: 0,
             active_row: 0,
@@ -1145,6 +1180,7 @@ impl App {
 
     pub fn on_key(&mut self, key: KeyEvent) {
         self.status = None;
+        self.selection = None;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if matches!(self.mode, Mode::Normal) {
             if self.on_alt_key(key) {
@@ -1424,6 +1460,9 @@ impl App {
             self.request = Some(Request::Mouse(id, relative));
             return;
         }
+        if self.on_selection_mouse(mouse, pane.zip(column_key)) {
+            return;
+        }
         match (&mut self.mode, mouse.kind) {
             (Mode::Form(form), MouseEventKind::Down(MouseButton::Left)) => form.on_click(pos),
             (Mode::Form(_) | Mode::ConfirmDelete { .. } | Mode::ConfirmClose { .. }, _) => {}
@@ -1464,6 +1503,55 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Text selection by dragging over a pane (its program doesn't want the
+    /// mouse): a click starts it, dragging extends it (clamped to the pane)
+    /// and releasing copies it. Returns true if the event was used up.
+    fn on_selection_mouse(&mut self, mouse: MouseEvent, under: Option<((Pane, Rect), SessionKey)>) -> bool {
+        let pos = Position::new(mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Down(_) => {
+                self.selection = None;
+                if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && matches!(self.mode, Mode::Normal)
+                    && !mouse.modifiers.contains(KeyModifiers::SHIFT)
+                    && let Some(((_, area), key)) = under
+                    && self.sessions.contains_key(&key)
+                    && !self.history_sessions.contains(&key)
+                {
+                    let cell = (pos.y - area.y, pos.x - area.x);
+                    self.selection = Some(MouseSelection { key, anchor: cell, head: cell, done: false });
+                }
+                // The click also focuses the pane.
+                false
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(selection) = self.selection.as_mut().filter(|s| !s.done) else { return false };
+                let Some((_, area)) = self.pane_areas.iter().find(|((c, r), _)| {
+                    self.columns.get(*c).and_then(|col| col.get(*r)) == Some(&selection.key)
+                }) else {
+                    return true;
+                };
+                let row = pos.y.clamp(area.y, area.bottom().saturating_sub(1)) - area.y;
+                let col = pos.x.clamp(area.x, area.right().saturating_sub(1)) - area.x;
+                selection.head = (row, col);
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let Some(selection) = self.selection.as_mut().filter(|s| !s.done) else { return false };
+                if selection.anchor == selection.head {
+                    // A plain click: nothing selected.
+                    self.selection = None;
+                } else {
+                    selection.done = true;
+                    let (start, end) = selection.bounds();
+                    self.request = Some(Request::CopySelection(selection.key, start, end));
+                }
+                true
+            }
+            _ => false,
         }
     }
 
@@ -1742,6 +1830,41 @@ mod tests {
         app.mouse_sessions.clear();
         app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
         assert_eq!(app.request.take(), Some(Request::Scroll(SessionKey::ssh(2), 3)));
+    }
+
+    #[test]
+    fn dragging_over_a_pane_selects_and_copies() {
+        let mut app = app_with_two_columns();
+        app.pane_areas = vec![((0, 0), Rect::new(30, 1, 40, 20)), ((1, 0), Rect::new(72, 1, 40, 20))];
+        let key = app.columns[0][0];
+        app.sessions.insert(key, SessionState::Alive);
+        let at = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+        let left = MouseButton::Left;
+        // A plain click focuses the pane and selects nothing.
+        app.on_mouse(at(MouseEventKind::Down(left), 35, 5));
+        app.on_mouse(at(MouseEventKind::Up(left), 35, 5));
+        assert_eq!((app.focus, app.selection, app.request.take()), (Focus::Terminal, None, None));
+        // Dragging backwards and out of the pane: clamped to its first column.
+        app.on_mouse(at(MouseEventKind::Down(left), 35, 5));
+        app.on_mouse(at(MouseEventKind::Drag(left), 10, 3));
+        let selection = app.selection.unwrap();
+        assert_eq!(selection.bounds(), ((2, 0), (4, 5)));
+        assert_eq!(selection.columns(2, 40), Some((0, 40)));
+        assert_eq!(selection.columns(4, 40), Some((0, 6)));
+        assert_eq!(selection.columns(5, 40), None);
+        app.on_mouse(at(MouseEventKind::Up(left), 10, 3));
+        assert_eq!(app.request.take(), Some(Request::CopySelection(key, (2, 0), (4, 5))));
+        assert!(app.selection.is_some_and(|s| s.done));
+        // The next key or click clears it.
+        app.on_key(alt('l'));
+        assert_eq!(app.selection, None);
+        // Not while the program wants the mouse, nor with Shift.
+        app.mouse_sessions.insert(key);
+        app.on_mouse(at(MouseEventKind::Down(left), 35, 5));
+        app.mouse_sessions.clear();
+        let shift = MouseEvent { modifiers: KeyModifiers::SHIFT, ..at(MouseEventKind::Down(left), 35, 5) };
+        app.on_mouse(shift);
+        assert_eq!(app.selection, None);
     }
 
     #[test]

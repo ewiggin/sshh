@@ -42,7 +42,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   publishes their state in `App::sessions`. `session.rs` = ssh in a PTY (portable-pty) + vt100
   parser, rendered with tui-term; `key_bytes` encodes keys as xterm does. `Responder` (vt100
   callbacks) answers terminal queries (DA1/DA2, DSR/CPR, XTVERSION, DECRQM, 18t) from the reader
-  thread. `mouse_bytes` encodes mouse events for programs in mouse mode (`App::mouse_sessions`).
+  thread. `mouse_bytes` encodes mouse events for programs in mouse mode (`App::mouse_sessions`); otherwise
+  dragging over a pane selects text (`App::selection`, screen cells) and releasing sends
+  `Request::CopySelection` (`Session::text_between`).
   History mode (`CopyMode`, `Alt-s`): snapshot of history+screen, line cursor/selection, search;
   keys routed via `Request::HistoryKey` while the id is in `App::history_sessions`. The loop polls crossterm
   with a short timeout and redraws when a session reader thread sets `dirty`.

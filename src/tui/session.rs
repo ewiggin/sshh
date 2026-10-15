@@ -243,6 +243,17 @@ impl Session {
         self.write(&bytes);
     }
 
+    /// Text of the screen as shown (scrolled back or not) from cell `start`
+    /// to `end` (row, column), both included. Wrapped lines are joined and
+    /// trailing spaces dropped.
+    pub fn text_between(&self, start: (u16, u16), end: (u16, u16)) -> String {
+        let parser = self.parser();
+        let screen = parser.screen();
+        let cols = screen.size().1;
+        let text = screen.contents_between(start.0, start.1, end.0, (end.1 + 1).min(cols));
+        text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
+    }
+
     pub fn copy_mode(&self) -> Option<&CopyMode> {
         self.copy.as_ref()
     }
@@ -768,6 +779,15 @@ mod tests {
             action = session.copy_key(plain(KeyCode::Char(c)));
         }
         action
+    }
+
+    #[test]
+    fn copies_the_text_between_two_cells() {
+        let session = session_with_lines(3);
+        // "line1".."line3" on rows 0..2.
+        assert_eq!(session.text_between((0, 2), (1, 2)), "ne1\nlin");
+        assert_eq!(session.text_between((2, 0), (2, 200)), "line3");
+        assert_eq!(session.text_between((1, 0), (1, 0)), "l");
     }
 
     #[test]
