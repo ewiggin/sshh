@@ -14,7 +14,7 @@ use tui_term::widget::{Cursor, PseudoTerminal};
 
 use super::app::{App, Focus, ListTab, Mode, Pane, SessionKey, SessionKind, SessionState};
 use super::session::Session;
-use crate::cli::{format_date, relative_time};
+use crate::cli::{format_date, relative_time, short_age};
 use crate::connect::shell_quote;
 use crate::db;
 use crate::model::{Host, HostData};
@@ -210,9 +210,16 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     // Computed first, so the rows below only borrow fields of `app`, not `app`.
     let states: Vec<Option<SessionState>> =
         app.entries.iter().map(|e| app.host_session(app.hosts[e.index].id)).collect();
+    let now = db::now();
     let rows = app.entries.iter().zip(states).map(|(e, state)| {
         let host = &app.hosts[e.index];
         let d = &host.data;
+        // Time since the last connection, like lazygit's branch recency;
+        // not needed while a session is alive.
+        let age = match (state, host.last_used) {
+            (Some(SessionState::Alive), _) | (_, None) => String::new(),
+            (_, Some(t)) => short_age(now - t),
+        };
         let mut spans = highlighted(&d.alias, &e.alias_hl);
         if let Some(name) = &d.name {
             spans.push(Span::raw("  "));
@@ -222,9 +229,13 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
             spans.push(Span::raw("  "));
             spans.push(tags_text(d).fg(TAG).dim());
         }
-        Row::new([Cell::from(session_dot(state)), Cell::from(Line::from(spans))])
+        Row::new([
+            Cell::from(session_dot(state)),
+            Cell::from(Line::from(age).right_aligned().dim()),
+            Cell::from(Line::from(spans)),
+        ])
     });
-    let table = Table::new(rows, [Constraint::Length(1), Constraint::Fill(1)])
+    let table = Table::new(rows, [Constraint::Length(1), Constraint::Length(3), Constraint::Fill(1)])
         .block(block)
         .column_spacing(1)
         .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))

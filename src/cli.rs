@@ -436,6 +436,18 @@ pub fn relative_time(secs: i64) -> String {
     }
 }
 
+/// Compact age, lazygit style: `5s`, `3m`, `2h`, `1d`, `2w`, `3M`, `1y`.
+pub fn short_age(secs: i64) -> String {
+    const UNITS: [(i64, &str); 6] =
+        [(365 * 86400, "y"), (30 * 86400, "M"), (7 * 86400, "w"), (86400, "d"), (3600, "h"), (60, "m")];
+    let secs = secs.max(0);
+    UNITS
+        .iter()
+        .find(|(size, _)| secs >= *size)
+        .map(|(size, unit)| format!("{}{unit}", secs / size))
+        .unwrap_or_else(|| format!("{secs}s"))
+}
+
 /// Local date `YYYY-MM-DD HH:MM`.
 pub fn format_date(timestamp: i64) -> String {
     use chrono::TimeZone;
@@ -444,4 +456,16 @@ pub fn format_date(timestamp: i64) -> String {
         .single()
         .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_age_uses_the_largest_unit() {
+        let ages = [0, 59, 60, 3599, 3600, 86400, 6 * 86400, 7 * 86400, 30 * 86400, 364 * 86400, 365 * 86400, -5];
+        let short: Vec<String> = ages.iter().map(|&s| short_age(s)).collect();
+        assert_eq!(short, ["0s", "59s", "1m", "59m", "1h", "1d", "6d", "1w", "1M", "12M", "1y", "0s"]);
+    }
 }

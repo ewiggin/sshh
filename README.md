@@ -192,9 +192,9 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
 ╭ Search ──────────╮╭ 1 ● web ───────────────╮╭ 2 ● db1 ───────────────╮
 ╰──────────────────╯│deploy@web:~$ uptime    ││postgres@db1:~$ psql    │
 ╭ Connections ─────╮│ 12:01 up 3 days        ││psql (16.2)             │
-│● web  Web        ││deploy@web:~$ █         ││postgres=#              │
-│● db1  Database   ││                        ││                        │
-│● bastion         ││                        ││                        │
+│●     web  Web    ││deploy@web:~$ █         ││postgres=#              │
+│●     db1  Data…  ││                        ││                        │
+│   3M bastion     ││                        ││                        │
 ╰──────────────────╯│                        ││                        │
 ╭ Details ─────────╮│                        ││                        │
 │Web production    ││                        ││                        │
@@ -210,7 +210,8 @@ scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
   Layouts tab lists the saved pane layouts (see below).
 - **Right**: **terminal columns**, each showing an embedded session side by side: the ssh session of
   a connection or, with `s`, its sftp session (a connection can have both open at once). Connections with a live session are marked with a green `●` in the list (a grey `○` means
-  the session ended). Closing a column doesn't close its session. With no column open, the right side
+  the session ended); next to it (unless the session is alive), the time since the last connection, lazygit style (`5m`, `2d`,
+  `3w`, `1M`, `1y`). Closing a column doesn't close its session. With no column open, the right side
   shows the actions and latest connections of the selected connection.
 
 Each embedded session is the system `ssh` running inside a pseudo terminal, so everything works as in
