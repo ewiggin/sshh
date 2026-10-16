@@ -1,0 +1,9 @@
+# Everforest (dark, medium) for sshh.
+# Palette by sainnhe: https://github.com/sainnhe/everforest (MIT).
+
+background = "#2d353b"
+foreground = "#d3c6aa"
+palette = [
+  "#475258", "#e67e80", "#a7c080", "#dbbc7f", "#7fbbb3", "#d699b6", "#83c092", "#d3c6aa",
+  "#859289", "#e67e80", "#a7c080", "#dbbc7f", "#7fbbb3", "#d699b6", "#83c092", "#d3c6aa",
+]

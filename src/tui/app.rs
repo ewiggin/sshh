@@ -17,6 +17,7 @@ use ratatui::widgets::TableState;
 use super::form::{self, Form, FormEvent, FormKind};
 use crate::db::{HistoryEntry, Layout};
 use crate::model::{Host, HostData};
+use crate::theme::Theme;
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Narrowest terminal column allowed when splitting.
@@ -109,6 +110,10 @@ pub enum Request {
     /// both included, in reading order.
     CopySelection(SessionKey, (u16, u16), (u16, u16)),
     External { program: External, host: Box<Host> },
+    /// Open the theme picker (the themes are read from disk).
+    Themes,
+    /// Save the theme in config.toml.
+    SaveTheme(String),
 }
 
 /// A pane of the terminal columns: (column, row inside the column).
@@ -169,6 +174,16 @@ pub enum Mode {
     ConfirmDeleteLayout { name: String },
     ConfirmClose { id: i64, alias: String },
     ConfirmQuit { sessions: usize },
+    Themes(ThemePicker),
+}
+
+/// Theme picker (`T`): the highlighted theme is shown while moving; Esc goes
+/// back to the one in use before.
+pub struct ThemePicker {
+    /// Each theme and whether it comes from the user's themes folder.
+    pub themes: Vec<(Theme, bool)>,
+    pub selected: usize,
+    pub previous: Theme,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -312,6 +327,8 @@ pub struct App {
     /// The panes are drawn one under the other (portrait, or the columns
     /// don't fit side by side), so Alt-j/k go through all of them.
     pub stacked: bool,
+    /// Colors applied after drawing (loaded by the main loop).
+    pub theme: Theme,
     matcher: Matcher,
     last_click: Option<(usize, Instant)>,
 }
@@ -355,6 +372,7 @@ impl App {
             columns_room: 0,
             portrait: false,
             stacked: false,
+            theme: Theme::terminal(),
             pane_areas: Vec::new(),
             matcher: Matcher::new(Config::DEFAULT),
             last_click: None,
@@ -584,6 +602,20 @@ impl App {
                     form.error = Some(msg);
                 }
             }
+        }
+    }
+
+    /// Opens the theme picker on the theme in use (`themes` is never empty:
+    /// it has at least `terminal`).
+    pub fn open_themes(&mut self, themes: Vec<(Theme, bool)>) {
+        let selected = themes.iter().position(|(t, _)| t.name == self.theme.name).unwrap_or(0);
+        self.mode = Mode::Themes(ThemePicker { themes, selected, previous: self.theme.clone() });
+    }
+
+    /// Leaves the theme picker without saving.
+    fn close_themes(&mut self) {
+        if let Mode::Themes(picker) = std::mem::replace(&mut self.mode, Mode::Normal) {
+            self.theme = picker.previous;
         }
     }
 
@@ -1334,6 +1366,23 @@ impl App {
                     self.focus = Focus::List;
                 }
             }
+            Mode::Themes(picker) => match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    picker.selected = (picker.selected + 1) % picker.themes.len();
+                    self.theme = picker.themes[picker.selected].0.clone();
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    picker.selected = (picker.selected + picker.themes.len() - 1) % picker.themes.len();
+                    self.theme = picker.themes[picker.selected].0.clone();
+                }
+                KeyCode::Enter => {
+                    self.request = Some(Request::SaveTheme(self.theme.name.clone()));
+                    self.mode = Mode::Normal;
+                }
+                KeyCode::Esc | KeyCode::Char('q') => self.close_themes(),
+                KeyCode::Char('c') if ctrl => self.close_themes(),
+                _ => {}
+            },
             Mode::ConfirmQuit { .. } => {
                 if matches!(key.code, KeyCode::Char('y' | 'Y')) {
                     self.outcome = Some(Outcome::Quit);
@@ -1390,6 +1439,7 @@ impl App {
             KeyCode::Char('e') => self.edit_selected(form::ALIAS),
             KeyCode::Char('t') => self.edit_selected(form::TAGS),
             KeyCode::Char('R') => self.request = Some(Request::Reload),
+            KeyCode::Char('T') => self.request = Some(Request::Themes),
             KeyCode::Char('f') if !ctrl => self.run_selected(External::Ssh),
             KeyCode::Char('s') => self.open_in_column(SessionKind::Sftp, true),
             KeyCode::Char('c') => self.run_selected(External::SshCopyId),
@@ -2720,5 +2770,52 @@ mod tests {
         // Clicking outside the rows does nothing.
         app.on_mouse(click(14));
         assert_eq!(app.table.selected(), Some(1));
+    }
+
+    fn themes() -> Vec<(Theme, bool)> {
+        let builtin = |name: &str| {
+            let (_, source) = crate::theme::BUILTIN.iter().find(|(n, _)| *n == name).unwrap();
+            (Theme::parse(name, source, crate::theme::Depth::TrueColor).unwrap(), false)
+        };
+        vec![(Theme::terminal(), false), builtin("gruvbox-dark"), builtin("monokai")]
+    }
+
+    #[test]
+    fn theme_picker_previews_and_saves() {
+        let mut app = app();
+        app.on_key(ch('T'));
+        assert_eq!(app.request.take(), Some(Request::Themes));
+        app.open_themes(themes());
+        // Moving shows the theme right away; Enter saves it.
+        app.on_key(ch('j'));
+        assert_eq!(app.theme.name, "gruvbox-dark");
+        app.on_key(key(KeyCode::Down));
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!(app.theme.name, "monokai");
+        assert_eq!(app.request.take(), Some(Request::SaveTheme("monokai".into())));
+        assert!(matches!(app.mode, Mode::Normal));
+        // It opens on the theme in use; k from the top wraps around.
+        app.open_themes(themes());
+        assert!(matches!(&app.mode, Mode::Themes(p) if p.selected == 2));
+        app.on_key(ch('j'));
+        assert_eq!(app.theme.name, "terminal");
+    }
+
+    #[test]
+    fn theme_picker_esc_restores_the_previous_theme() {
+        let mut app = app();
+        app.open_themes(themes());
+        app.on_key(ch('k'));
+        assert_eq!(app.theme.name, "monokai");
+        app.on_key(key(KeyCode::Esc));
+        assert_eq!(app.theme.name, "terminal");
+        assert_eq!(app.request, None);
+        assert!(matches!(app.mode, Mode::Normal));
+        // Ctrl-c cancels too (it doesn't quit from the picker).
+        app.open_themes(themes());
+        app.on_key(ch('j'));
+        app.on_key(ctrl('c'));
+        assert_eq!(app.theme.name, "terminal");
+        assert_eq!(app.outcome, None);
     }
 }
