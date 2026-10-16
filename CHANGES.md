@@ -4,6 +4,8 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
 ## Unreleased
 
+- `sshh add` without a destination opens the add form, prefilled with the alias and options given
+  ([#2](https://github.com/ewiggin/sshh/issues/2)).
 - The GitHub release notes are the version's section of this file.
 - The README explains how to run the macOS binary when the tarball was downloaded with a browser
   (`xattr -d com.apple.quarantine sshh`).
