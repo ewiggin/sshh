@@ -1,7 +1,7 @@
 //! sshh's own subcommands (`sshh ls`, `sshh add`, ...).
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
@@ -14,7 +14,7 @@ use crate::db::{self, Db, ImportReport, OnConflict};
 use crate::include::{self, INCLUDE_LINE, IncludeState};
 use crate::model::{HostData, RESERVED_ALIASES, SshOption};
 use crate::ssh_args::{Destination, parse_option};
-use crate::ssh_config;
+use crate::{ssh_config, tui};
 
 #[derive(Parser)]
 #[command(
@@ -34,7 +34,7 @@ struct Cli {
 enum Command {
     /// List saved connections
     Ls,
-    /// Save a new connection
+    /// Save a new connection (without a destination it opens the add form)
     Add(AddArgs),
     /// Delete a connection
     Rm { alias: String },
@@ -89,9 +89,10 @@ enum SshConfigAction {
 #[derive(Args)]
 struct AddArgs {
     /// Alias used for the connection (`sshh <alias>`)
-    alias: String,
-    /// Destination: [user@]host or ssh://[user@]host[:port]
-    destination: String,
+    alias: Option<String>,
+    /// Destination: [user@]host or ssh://[user@]host[:port]. Without it, the
+    /// add form opens prefilled with the other arguments
+    destination: Option<String>,
     #[arg(short, long)]
     port: Option<u16>,
     #[arg(short, long)]
@@ -226,14 +227,43 @@ fn print_include_state() -> Result<()> {
 }
 
 fn add(args: AddArgs) -> Result<()> {
-    let Some(dest) = Destination::parse(&args.destination) else {
-        bail!("invalid destination '{}'", args.destination);
+    let dest = match &args.destination {
+        Some(d) => match Destination::parse(d) {
+            Some(dest) => Some(dest),
+            None => bail!("invalid destination '{d}'"),
+        },
+        None => None,
     };
-    let data = HostData {
-        alias: args.alias,
-        hostname: dest.host,
-        user: dest.user,
-        port: args.port.or(dest.port),
+    let data = add_data(args, dest.as_ref());
+    let mut db = Db::open_default()?;
+    let data = if dest.is_some() {
+        db.insert_host(&data)?;
+        data
+    } else {
+        // Without a destination: the add form, prefilled with what was given.
+        if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+            bail!("missing the destination: sshh add <alias> <destination> (the add form needs a terminal)");
+        }
+        match tui::add_form(&mut db, &data)? {
+            Some(data) => data,
+            None => {
+                println!("Cancelled");
+                return Ok(());
+            }
+        }
+    };
+    include::refresh_or_warn(&db);
+    println!("Connection '{}' saved", data.alias);
+    Ok(())
+}
+
+/// Connection data from `sshh add` arguments (empty fields if they are missing).
+fn add_data(args: AddArgs, dest: Option<&Destination>) -> HostData {
+    HostData {
+        alias: args.alias.unwrap_or_default(),
+        hostname: dest.map(|d| d.host.clone()).unwrap_or_default(),
+        user: dest.and_then(|d| d.user.clone()),
+        port: args.port.or(dest.and_then(|d| d.port)),
         identity_file: args.identity,
         proxy_jump: args.jump,
         tmux_session: args.tmux,
@@ -242,19 +272,14 @@ fn add(args: AddArgs) -> Result<()> {
         description: args.description,
         notes: args.notes,
         tags: args.tags,
-    };
-    let mut db = Db::open_default()?;
-    db.insert_host(&data)?;
-    include::refresh_or_warn(&db);
-    println!("Connection '{}' saved", data.alias);
-    Ok(())
+    }
 }
 
 pub fn list() -> Result<()> {
     let hosts = Db::open_default()?.list_hosts()?;
     if hosts.is_empty() {
         println!("No saved connections.");
-        println!("Add one with `sshh add <alias> <destination>` or import your ~/.ssh/config with `sshh import-ssh-config`.");
+        println!("Add one with `sshh add` or import your ~/.ssh/config with `sshh import-ssh-config`.");
         return Ok(());
     }
     let now = db::now();
@@ -465,6 +490,42 @@ pub fn format_date(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn add_args(args: &[&str]) -> AddArgs {
+        let cli = Cli::try_parse_from(["sshh", "add"].iter().chain(args)).unwrap();
+        match cli.command {
+            Command::Add(args) => args,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn add_without_arguments_parses() {
+        let args = add_args(&[]);
+        assert!(args.alias.is_none() && args.destination.is_none());
+        assert_eq!(add_data(args, None), HostData::default());
+    }
+
+    #[test]
+    fn add_prefills_the_form_with_the_given_arguments() {
+        let data = add_data(add_args(&["web", "-p", "2222", "-t", "prod,web"]), None);
+        assert_eq!(data.alias, "web");
+        assert_eq!(data.hostname, "");
+        assert_eq!(data.port, Some(2222));
+        assert_eq!(data.tags, ["prod", "web"]);
+    }
+
+    #[test]
+    fn add_with_destination_fills_the_host() {
+        let args = add_args(&["web", "ssh://admin@web.example.com:2200"]);
+        let dest = Destination::parse(args.destination.as_deref().unwrap()).unwrap();
+        let data = add_data(args, Some(&dest));
+        assert_eq!((data.hostname.as_str(), data.user.as_deref(), data.port), ("web.example.com", Some("admin"), Some(2200)));
+        // -p wins over the port in the destination.
+        let args = add_args(&["web", "ssh://web.example.com:2200", "-p", "22"]);
+        let dest = Destination::parse(args.destination.as_deref().unwrap()).unwrap();
+        assert_eq!(add_data(args, Some(&dest)).port, Some(22));
+    }
 
     #[test]
     fn short_age_uses_the_largest_unit() {
