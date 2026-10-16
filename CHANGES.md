@@ -2,7 +2,7 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.9.2 — 2026-10-17
 
 - Releases are published to crates.io (`cargo install sshh-tui`) automatically, right after the
   GitHub release ([#9](https://github.com/ewiggin/sshh/issues/9)).
