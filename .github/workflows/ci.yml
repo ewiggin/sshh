@@ -49,3 +49,22 @@ jobs:
           file target/x86_64-unknown-linux-musl/release/sshh | grep -q "static"
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --locked
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Release tarball
+        run: |
+          make dist
+          tar -tzf dist/sshh-aarch64-apple-darwin.tar.gz | grep -q "/sshh$"
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"

@@ -18,7 +18,8 @@ name = "sshh"
 path = "src/main.rs"
 
 # `cargo binstall sshh-tui` downloads the release tarball instead of building
-# (on linux-gnu it also tries the musl targets, which are the ones published).
+# (on linux-gnu it also tries the musl targets, which are the ones published;
+# on macOS only aarch64-apple-darwin is published).
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/sshh-{ target }.tar.gz"
 bin-dir = "sshh-{ target }/{ bin }{ binary-ext }"

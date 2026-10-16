@@ -8,7 +8,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   sshh must never get in the way of a connection: if the parser or the DB fails, warn and pass the
   args through unchanged.
 - **No secrets are stored** (passwords): keys and ssh-agent.
-- Source of truth: SQLite at `~/.local/share/sshh/sshh.db` (`$SSHH_DB` to override).
+- Source of truth: SQLite at `~/.local/share/sshh/sshh.db` (`$XDG_DATA_HOME` respected, same path
+  on macOS, not `~/Library`; `$SSHH_DB` to override).
   JSON import/export (format = `model::HostData`).
 - Ecosystem compatibility: `include.rs` generates `~/.ssh/config.d/sshh.conf` (enabled if the file
   exists; `include::refresh` after every DB change). **`~/.ssh/config` is never modified**: the user
@@ -54,7 +55,7 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   with a short timeout and redraws when a session reader thread sets `dirty`.
   `form.rs` = add/edit/wizard form. `ui.rs` = rendering. `term.rs` = terminal, $EDITOR, external
   programs (`run_external` suspends/resumes the TUI; never `exec` from the TUI or sessions die) and
-  clipboard (wl-copy/xclip, OSC 52 fallback).
+  clipboard (pbcopy on macOS, wl-copy/xclip, OSC 52 fallback).
 - List pane tabs (`App::tab`, `ListTab`): Connections, Tags and Layouts (`[`/`]`, click on the title via
   `App::tab_areas`). Tags tab = `App::tags` (name + count, recomputed in `refilter`); Space/Enter
   sets the query to `#tag` and goes back; connection actions are ignored there (`on_tags_key`).
@@ -88,9 +89,13 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Static build: `make static` / `make install-static` / `make dist` (musl target
   `x86_64-unknown-linux-musl`, needs `musl-gcc` for bundled SQLite; tests also pass with
   `cargo test --target x86_64-unknown-linux-musl`). Release profile has `strip = true`.
+- macOS (Apple Silicon only for releases): `make dist` builds `DIST_TARGET` (musl on Linux,
+  `aarch64-apple-darwin` on macOS). Makefile and install.sh must work with BSD tools: no
+  `install -D`/`-t`, `sha256sum` falls back to `shasum -a 256`.
 - CI (`.github/workflows/ci.yml`): tests, clippy `-D warnings`, `make lint-man`, shellcheck of
-  install.sh, static build. Release (`release.yml`): on tag `vX.Y.Z` (must match Cargo.toml),
-  builds `make dist` for x86_64 and aarch64 musl and publishes `sshh-<target>.tar.gz` + `.sha256`
+  install.sh, static build; macOS job (tests, clippy, `make dist`). Release (`release.yml`): on tag
+  `vX.Y.Z` (must match Cargo.toml), builds `make dist` for x86_64 and aarch64 musl and
+  aarch64-apple-darwin (`MACOSX_DEPLOYMENT_TARGET` 11.0) and publishes `sshh-<target>.tar.gz` + `.sha256`
   (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
 - Versions: `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh + GNU sed) updates
   Cargo.toml, Cargo.lock and the man page `.TH` line and commits "bump to vX.Y.Z"; then tag + push.
@@ -100,7 +105,7 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Install: `make build && make install` (PREFIX defaults to `~/.local`; `install` never builds;
   plain `make` only lists the targets, documented with `## ` comments in the Makefile), or
   `install.sh` (POSIX sh, used as `curl … | sh`): downloads the release tarball for Linux
-  x86_64/aarch64 and checks its sha256; falls back to building from source (clone + make), and
+  x86_64/aarch64 or macOS arm64 (also under Rosetta) and checks its sha256; falls back to building from source (clone + make), and
   always builds when run from a clone or with `SSHH_FROM_SOURCE`/`SSHH_REF`. Uses sudo only for the
   copy. Test with `SSHH_RELEASES=http://127.0.0.1:<port>` (python http.server serving
   `latest/download/<asset>`), `SSHH_REPO=file://…`, `SSHH_PREFIX=<tmp>`; keep it sh/dash compatible.

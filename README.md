@@ -43,12 +43,14 @@ SSH connection manager for the terminal, written in Rust.
 curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | sh
 ```
 
-On Linux x86_64 and aarch64 the script downloads the **static binary** of the latest
-[release](https://github.com/ewiggin/sshh/releases), checks its SHA-256 and installs it with the man
-page for your user, in `~/.local/bin/sshh` and `~/.local/share/man/man1/sshh.1` (no sudo needed),
+On Linux x86_64 and aarch64 (a **static binary**) and on macOS with Apple Silicon the script
+downloads the binary of the latest [release](https://github.com/ewiggin/sshh/releases), checks its
+SHA-256 and installs it with the man page for your user, in `~/.local/bin/sshh` and `~/.local/share/man/man1/sshh.1` (no sudo needed),
 so `man sshh` works. It only needs `curl` (or `wget`) and OpenSSH. On other systems, or if the
-download fails, it builds sshh from source, which needs Rust ≥ 1.88, git and make. It warns you if
-`~/.local/bin` is not in your `PATH`. Run it again to update.
+download fails (e.g. Intel Macs), it builds sshh from source, which needs Rust ≥ 1.88, git and make
+(on macOS, `xcode-select --install`). It warns you if `~/.local/bin` is not in your `PATH` (on
+macOS it isn't by default: add `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc`). Run it again to
+update.
 
 | Variable / option | Effect |
 |---|---|
@@ -58,8 +60,9 @@ download fails, it builds sshh from source, which needs Rust ≥ 1.88, git and m
 | `SSHH_REF=main` | build that branch or tag from source |
 | `sh -s -- --uninstall` | remove the binary and the man page (your connections are kept) |
 
-You can also download the tarball for your architecture from the releases page: it contains the
-static binary, the man page and the licenses.
+You can also download the tarball for your system from the releases page
+(`sshh-x86_64-unknown-linux-musl`, `sshh-aarch64-unknown-linux-musl`, `sshh-aarch64-apple-darwin`):
+it contains the binary, the man page and the licenses.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | SSHH_PREFIX=/usr/local sh
@@ -94,7 +97,7 @@ A fully static build runs on any x86_64 Linux, whatever its glibc version, with 
 
 ```sh
 make static && make install-static     # build and install it
-make dist                              # dist/sshh-<version>-x86_64-unknown-linux-musl.tar.gz (+ .sha256)
+make dist                              # dist/sshh-x86_64-unknown-linux-musl.tar.gz (+ .sha256)
 ```
 
 The tarball contains `sshh`, `sshh.1` and this README, ready to attach to a release or copy to another
@@ -105,6 +108,9 @@ machine. Building it needs the musl Rust target and `musl-gcc`:
 | rustup | `rustup target add x86_64-unknown-linux-musl` (+ `musl-gcc` from your distribution) |
 | Arch | `rust-musl` and `musl` |
 | Debian / Ubuntu | `musl-tools` (+ the rustup target) |
+
+On macOS `make dist` builds the native binary instead (`dist/sshh-aarch64-apple-darwin.tar.gz`; it
+only links system libraries).
 
 Binary only, without the man page and without cloning (installs `sshh` to `~/.cargo/bin`; the
 crate is called `sshh-tui` because `sshh` was taken on crates.io):
@@ -626,7 +632,8 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
 
 ## Data and storage
 
-- SQLite database at `~/.local/share/sshh/sshh.db` (directory with `0700` permissions).
+- SQLite database at `~/.local/share/sshh/sshh.db`, or `$XDG_DATA_HOME/sshh/sshh.db` if set (directory
+  with `0700` permissions). macOS uses the same path.
 - Stored: alias, host, user, port, identity, ProxyJump, extra options, name, description, notes, tags
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
@@ -645,7 +652,7 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
 | `SSHH_INCLUDE_FILE=<path>` | another path for the generated ssh_config file (useful for testing) |
 | `VISUAL` / `EDITOR` | editor for `Ctrl-e` in the form |
 
-The clipboard (`yy`) uses `wl-copy` (Wayland) or `xclip` (X11) when available and otherwise the
+The clipboard (`yy`) uses `pbcopy` on macOS, `wl-copy` (Wayland) or `xclip` (X11) when available and otherwise the
 OSC 52 escape sequence, which most terminals support and which also works over ssh.
 
 ## Development
@@ -718,7 +725,8 @@ server, like tmux), character-wise selection in history mode.
 2. Tag and push (the command prints it): `git tag v0.2.0 && git push origin main v0.2.0`.
 
 The release workflow checks that the tag matches `Cargo.toml`, runs the tests and publishes static
-binaries for x86_64 and aarch64 Linux with their SHA-256 checksums.
+binaries for x86_64 and aarch64 Linux and a binary for macOS on Apple Silicon, with their SHA-256
+checksums.
 
 ## License
 

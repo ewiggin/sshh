@@ -1,5 +1,6 @@
 # Push a tag matching the version in Cargo.toml (e.g. v0.1.0) to publish a
-# release with static binaries for x86_64 and aarch64 Linux.
+# release with static binaries for x86_64 and aarch64 Linux and a binary for
+# macOS on Apple Silicon.
 name: Release
 
 on:
@@ -11,6 +12,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Oldest macOS the binary runs on (also for the bundled SQLite built by cc).
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 jobs:
   build:
@@ -21,6 +24,8 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -34,14 +39,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Tests
         run: cargo test --locked --target ${{ matrix.target }}
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CC_aarch64_unknown_linux_musl: musl-gcc
       - name: Build the tarball
-        run: make dist MUSL_TARGET=${{ matrix.target }}
+        run: make dist DIST_TARGET=${{ matrix.target }}
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CC_aarch64_unknown_linux_musl: musl-gcc

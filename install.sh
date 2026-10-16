@@ -4,8 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | sh -s -- --uninstall
 #
-# On Linux x86_64 / aarch64 it downloads the static binary of the latest
-# release; otherwise (or if that fails) it builds sshh from source, which
+# On Linux x86_64 / aarch64 and macOS on Apple Silicon it downloads the binary
+# of the latest release; otherwise (or if that fails) it builds sshh from source, which
 # needs git, make and Rust. Run from a clone (./install.sh), it builds that
 # code. See --help for the options.
 
@@ -36,8 +36,8 @@ Installs sshh (binary + man page).
 
 Usage: install.sh [--uninstall | --help]
 
-By default it downloads the static binary of the latest release (Linux x86_64
-and aarch64) and falls back to building from source.
+By default it downloads the binary of the latest release (Linux x86_64 and
+aarch64, macOS on Apple Silicon) and falls back to building from source.
 
 Environment:
   SSHH_PREFIX       install prefix (default: ~/.local, or /usr/local as root)
@@ -82,10 +82,23 @@ clone_dir() {
 
 # Rust target of the prebuilt binary for this machine, if there is one.
 release_target() {
-    [ "$(uname -s)" = Linux ] || return 0
-    case "$(uname -m)" in
-        x86_64 | amd64) echo x86_64-unknown-linux-musl ;;
-        aarch64 | arm64) echo aarch64-unknown-linux-musl ;;
+    arch=$(uname -m)
+    case "$(uname -s)" in
+        Linux)
+            case "$arch" in
+                x86_64 | amd64) echo x86_64-unknown-linux-musl ;;
+                aarch64 | arm64) echo aarch64-unknown-linux-musl ;;
+            esac
+            ;;
+        Darwin)
+            # A shell running under Rosetta reports x86_64 on Apple Silicon.
+            if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+                arch=arm64
+            fi
+            case "$arch" in
+                arm64 | aarch64) echo aarch64-apple-darwin ;;
+            esac
+            ;;
     esac
 }
 
@@ -134,8 +147,10 @@ install_binary() {
 
     info "Installing to $PREFIX"
     # Called from an `if`, where `set -e` doesn't apply: check each step.
-    as_owner install -Dm755 "$TMP/sshh-$target/sshh" "$BINDIR/sshh" || die "could not install the binary"
-    as_owner install -Dm644 "$TMP/sshh-$target/sshh.1" "$MANDIR/man1/sshh.1" || die "could not install the man page"
+    # No `install -D`: macOS (BSD) install doesn't have it.
+    as_owner install -d "$BINDIR" "$MANDIR/man1" || die "could not create $BINDIR and $MANDIR/man1"
+    as_owner install -m755 "$TMP/sshh-$target/sshh" "$BINDIR/sshh" || die "could not install the binary"
+    as_owner install -m644 "$TMP/sshh-$target/sshh.1" "$MANDIR/man1/sshh.1" || die "could not install the man page"
 }
 
 check_build_requirements() {
@@ -144,7 +159,12 @@ check_build_requirements() {
         command -v "$cmd" >/dev/null 2>&1 || missing="$missing$cmd "
     done
     if [ -n "$missing" ]; then
-        die "missing ${missing}to build from source (install Rust with https://rustup.rs and git/make with your package manager)"
+        if [ "$(uname -s)" = Darwin ]; then
+            tools="git/make with 'xcode-select --install'"
+        else
+            tools="git/make with your package manager"
+        fi
+        die "missing ${missing}to build from source (install Rust with https://rustup.rs and $tools)"
     fi
     rust=$(rustc --version 2>/dev/null | awk '{print $2}')
     if [ -z "$rust" ] || ! version_ge "$rust" "$MIN_RUST"; then

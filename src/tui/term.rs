@@ -92,10 +92,12 @@ pub fn edit_external(terminal: &mut DefaultTerminal, text: &str) -> Result<Strin
     result
 }
 
-/// Copies to the clipboard. Uses wl-copy/xclip when available; otherwise OSC 52
-/// (supported by most terminals, and it also works over ssh).
+/// Copies to the clipboard. Uses pbcopy (macOS) or wl-copy/xclip when available;
+/// otherwise OSC 52 (supported by most terminals, and it also works over ssh).
 pub fn copy(text: &str) -> Result<()> {
-    let tool: Option<&[&str]> = if env::var_os("WAYLAND_DISPLAY").is_some() {
+    let tool: Option<&[&str]> = if cfg!(target_os = "macos") {
+        Some(&["pbcopy"])
+    } else if env::var_os("WAYLAND_DISPLAY").is_some() {
         Some(&["wl-copy"])
     } else if env::var_os("DISPLAY").is_some() {
         Some(&["xclip", "-selection", "clipboard"])

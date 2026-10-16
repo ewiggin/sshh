@@ -628,7 +628,9 @@ in the form (default
 .SH FILES
 .TP
 .I ~/.local/share/sshh/sshh.db
-SQLite database with the connections, tags and history.
+SQLite database with the connections, tags and history
+.RI ( $XDG_DATA_HOME/sshh/sshh.db
+if set; the same path on macOS).
 .TP
 .I ~/.ssh/config.d/sshh.conf
 Generated ssh_config file, only when enabled with

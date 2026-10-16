@@ -72,14 +72,19 @@ pub struct Db {
 }
 
 impl Db {
-    /// Database path: `$SSHH_DB` or `~/.local/share/sshh/sshh.db`.
+    /// Database path: `$SSHH_DB` or `$XDG_DATA_HOME/sshh/sshh.db` (default `~/.local/share/sshh/sshh.db`).
     pub fn default_path() -> Result<PathBuf> {
         if let Some(path) = std::env::var_os("SSHH_DB") {
             return Ok(path.into());
         }
-        let dirs = directories::ProjectDirs::from("", "", "sshh")
+        // XDG layout on every platform (also on macOS instead of ~/Library/Application
+        // Support), so the path is the same everywhere.
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| directories::BaseDirs::new().map(|d| d.home_dir().join(".local/share")))
             .ok_or_else(|| anyhow!("could not determine the data directory"))?;
-        Ok(dirs.data_dir().join("sshh.db"))
+        Ok(data.join("sshh").join("sshh.db"))
     }
 
     pub fn open_default() -> Result<Self> {
