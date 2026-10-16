@@ -4,6 +4,8 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
 ## Unreleased
 
+- Releases are published to crates.io (`cargo install sshh-tui`) automatically, right after the
+  GitHub release ([#9](https://github.com/ewiggin/sshh/issues/9)).
 - `sshh add` without a destination opens the add form, prefilled with the alias and options given
   ([#2](https://github.com/ewiggin/sshh/issues/2)).
 - The GitHub release notes are the version's section of this file.
