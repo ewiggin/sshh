@@ -4,6 +4,12 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
 ## Unreleased
 
+- **Themes.** Besides the default `terminal` theme (the terminal's own colors), sshh ships
+  `gruvbox`, `everforest`, `kanagawa`, `monokai` and `material` themes, which also recolor what runs
+  in the panes, so sshh looks right on terminals with a poor palette (like the macOS Terminal).
+  Choose one with `T` in the TUI, `theme = "…"` in `~/.config/sshh/config.toml` or `SSHH_THEME`; add
+  your own in `~/.config/sshh/themes/`; list them with `sshh themes`
+  ([#7](https://github.com/ewiggin/sshh/issues/7)).
 - `sshh add` without a destination opens the add form, prefilled with the alias and options given
   ([#2](https://github.com/ewiggin/sshh/issues/2)).
 - The GitHub release notes are the version's section of this file.
