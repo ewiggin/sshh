@@ -807,6 +807,11 @@ it, runs the tests and publishes static binaries for x86_64 and aarch64 Linux an
 on Apple Silicon, with their SHA-256 checksums. The release notes are that version's section of
 `CHANGES.md` (`scripts/release-notes.sh v0.2.0` prints them).
 
+After the GitHub Release, the same workflow publishes the crate (`sshh-tui`) on crates.io with
+[Trusted Publishing](https://crates.io/docs/trusted-publishing): no API token is stored in the
+repository. If that step fails, the GitHub Release is already published; run the `publish` job again
+once it's fixed.
+
 ## License
 
 Licensed under either of
