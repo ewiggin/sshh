@@ -1446,7 +1446,8 @@ impl App {
         }
         match &mut self.mode {
             Mode::Form(form) => match form.on_key(key) {
-                FormEvent::None => {}
+                // Only the wizard ignores destinations, and it isn't in the TUI.
+                FormEvent::None | FormEvent::Ignore => {}
                 FormEvent::Cancel => self.mode = Mode::Normal,
                 FormEvent::Editor => self.request = Some(Request::Editor),
                 FormEvent::Submit => {

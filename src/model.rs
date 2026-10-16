@@ -128,7 +128,7 @@ pub struct Host {
 
 /// sshh's own subcommands; they cannot be used as aliases.
 pub const RESERVED_ALIASES: &[&str] =
-    &["ls", "add", "rm", "help", "history", "export", "import", "import-ssh-config", "ssh-config", "themes"];
+    &["ls", "add", "rm", "help", "history", "export", "import", "import-ssh-config", "ssh-config", "themes", "ignore"];
 
 /// tmux session names: letters, digits, `-` and `_`, so they need no quoting
 /// in the remote command (tmux itself rejects `:` and `.`).
@@ -144,6 +144,38 @@ pub fn validate_tmux_session(name: &str) -> Result<()> {
 
 /// Remote command that attaches to the tmux session `name`, creating it if
 /// needed. Without tmux on the server it falls back to a login shell.
+/// The user ssh uses when none is given.
+pub fn local_user() -> String {
+    std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default()
+}
+
+/// Where ssh connects: `user@hostname:port`, always explicit (the form the
+/// ignored destinations are stored and shown in).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoint {
+    pub user: String,
+    pub hostname: String,
+    pub port: u16,
+}
+
+impl Endpoint {
+    /// Parses exactly `user@hostname:port` (as `sshh ignore` prints it).
+    pub fn parse(s: &str) -> Option<Self> {
+        let (user, rest) = s.split_once('@')?;
+        let (hostname, port) = rest.rsplit_once(':')?;
+        let port = port.parse().ok()?;
+        let valid = |part: &str| !part.is_empty() && !part.contains(['@', ':', '/']);
+        (valid(user) && valid(hostname))
+            .then(|| Self { user: user.into(), hostname: hostname.into(), port })
+    }
+}
+
+impl std::fmt::Display for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}:{}", self.user, self.hostname, self.port)
+    }
+}
+
 pub fn tmux_command(name: &str) -> String {
     format!("tmux new-session -A -s {name} || exec $SHELL -l")
 }
@@ -200,5 +232,15 @@ mod tests {
         };
         let keys: Vec<_> = data.ssh_options().into_iter().map(|(k, v)| format!("{k}={v}")).collect();
         assert_eq!(keys, ["HostName=h", "Port=22", "ForwardAgent=yes"]);
+    }
+
+    #[test]
+    fn endpoint_parse() {
+        let e = Endpoint::parse("deploy@10.0.0.5:2222").unwrap();
+        assert_eq!((e.user.as_str(), e.hostname.as_str(), e.port), ("deploy", "10.0.0.5", 2222));
+        assert_eq!(e.to_string(), "deploy@10.0.0.5:2222");
+        for s in ["10.0.0.5:22", "deploy@10.0.0.5", "@h:22", "u@:22", "u@h:x", "u@h:99999", "ssh://u@h:22", "u@[::1]:22"] {
+            assert_eq!(Endpoint::parse(s), None, "{s}");
+        }
     }
 }

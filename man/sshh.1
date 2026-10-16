@@ -134,6 +134,14 @@ Save the connection and connect.
 .B Esc
 Connect without saving.
 .TP
+.B Ctrl\-n
+Connect without saving and never ask again for this
+.IR user @ hostname : port
+(as resolved by
+.BR "ssh \-G" ).
+See
+.BR "sshh ignore" .
+.TP
 .B Ctrl\-c
 Cancel; don't connect.
 .PP
@@ -611,6 +619,23 @@ block:
 Include config.d/sshh.conf
 .EE
 .RE
+.TP
+.BR ignore " [" list | "add \fIdestination\fR" | "rm \fIdestination\fR" ]
+List the destinations the wizard never asks to save (added with
+.B Ctrl\-n
+in the wizard), ignore one
+.RI ( [user@]host 
+.RI "or " user@host:port ,
+an ssh_config alias or
+.BR ssh:// \&...,
+resolved with
+.BR "ssh \-G" ),
+or ask again for one
+.RI ( user@hostname:port
+as listed, or any form
+.B add
+accepts).
+Saving a destination also removes it from the list.
 .TP
 .BR themes " [" list | "show \fIname\fR" ]
 List the color themes, marking the one in use, or print the file of one

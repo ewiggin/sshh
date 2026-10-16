@@ -188,10 +188,22 @@ reports: host, user, port and ProxyJump. The suggested alias is the short host n
 |---|---|
 | `Enter` | save and connect |
 | `Esc` | connect without saving |
+| `Ctrl-n` | connect without saving and never ask again for this destination |
 | `Ctrl-c` | cancel (doesn't connect) |
 
 It only appears when stdin, stdout and stderr are all terminals, so it never gets in the way of
 scripts. It can be disabled with `SSHH_NO_WIZARD=1`.
+
+`Ctrl-n` is for hosts you never want to save (temporary IPs, CI machines, one-off servers). It
+remembers the exact `user@hostname:port` that `ssh -G` resolves, so the same host with another user
+or port still asks. Saving that destination later (TUI or `sshh add`) takes it off the list.
+Connections to ignored destinations aren't recorded in the history, like any unsaved destination.
+
+```sh
+sshh ignore                              # list them
+sshh ignore add ci@build.example.com     # ignore without going through the wizard
+sshh ignore rm ci@build.example.com:22   # ask again (as listed, or any form `add` accepts)
+```
 
 ## TUI
 
@@ -528,6 +540,7 @@ sshh import <file|->                         # import from JSON
 sshh import-ssh-config [file]                # import the Host blocks of ~/.ssh/config
 sshh ssh-config [status|sync|print|disable]  # generated ssh_config file (see below)
 sshh themes [list|show <name>]               # color themes (see Themes)
+sshh ignore [list|add <dest>|rm <dest>]      # destinations the wizard never asks to save
 sshh --help                                  # help (also `sshh <subcommand> --help`)
 ```
 
@@ -718,7 +731,8 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
 
 - SQLite database at `~/.local/share/sshh/sshh.db`, or `$XDG_DATA_HOME/sshh/sshh.db` if set (directory
   with `0700` permissions). macOS uses the same path.
-- Stored: alias, host, user, port, identity, ProxyJump, extra options, name, description, notes, tags
+- Stored: alias, host, user, port, identity, ProxyJump, extra options, name, description, notes, tags,
+  the destinations the wizard ignores
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
 - The schema migrates itself on startup.
@@ -778,7 +792,7 @@ tmux capture-pane -p -t t
 | `src/model.rs` | data model and validation |
 | `src/ssh_config.rs` | reads ssh_config files (with `Include`) to import them |
 | `src/include.rs` | generated ssh_config file (`~/.ssh/config.d/sshh.conf`) |
-| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`, `themes`) |
+| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`, `themes`, `ignore`) |
 | `src/theme.rs` | color themes: loading, config file and palette applied after drawing (`themes/` = built-in ones) |
 | `src/tui/app.rs` | TUI state and event handling (no terminal; testable) |
 | `src/tui/form.rs` | add/edit form and wizard |

@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-use crate::connect::shell_quote;
+use crate::connect::{self, shell_quote};
 use crate::db::{self, Db, ImportReport, OnConflict};
 use crate::include::{self, INCLUDE_LINE, IncludeState};
 use crate::model::{HostData, RESERVED_ALIASES, SshOption};
@@ -72,11 +72,28 @@ enum Command {
         #[command(subcommand)]
         action: Option<SshConfigAction>,
     },
+    /// Destinations the wizard never asks to save (Ctrl-n in the wizard)
+    Ignore {
+        #[command(subcommand)]
+        action: Option<IgnoreAction>,
+    },
     /// List the color themes, or print one to start your own
     Themes {
         #[command(subcommand)]
         action: Option<ThemesAction>,
     },
+}
+
+#[derive(Subcommand)]
+enum IgnoreAction {
+    /// List the ignored destinations (default)
+    List,
+    /// Never open the wizard for a destination: [user@]host, user@host:port,
+    /// an ssh_config alias or ssh://… (resolved with `ssh -G`)
+    Add { destination: String },
+    /// Open the wizard again for a destination (as `sshh ignore` lists it, or
+    /// any form `add` accepts)
+    Rm { destination: String },
 }
 
 #[derive(Subcommand)]
@@ -188,8 +205,40 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::Import { file, opts } => import(file, opts),
         Command::ImportSshConfig { file, tags, opts } => import_ssh_config(file, tags, opts),
         Command::SshConfig { action } => ssh_config_cmd(action.unwrap_or(SshConfigAction::Status)),
+        Command::Ignore { action } => ignore_cmd(action.unwrap_or(IgnoreAction::List)),
         Command::Themes { action } => themes_cmd(action.unwrap_or(ThemesAction::List)),
     }
+}
+
+fn ignore_cmd(action: IgnoreAction) -> Result<()> {
+    let db = Db::open_default()?;
+    match action {
+        IgnoreAction::List => {
+            let ignored = db.list_ignored()?;
+            if ignored.is_empty() {
+                println!("No ignored destinations. Ctrl-n in the wizard (or `sshh ignore add`) adds one.");
+            }
+            for (endpoint, at) in ignored {
+                println!("{endpoint:<40} {}", format_date(at));
+            }
+        }
+        IgnoreAction::Add { destination } => {
+            let endpoint = connect::endpoint_of(&destination)?;
+            if db.ignore(&endpoint)? {
+                println!("The wizard won't ask again for {endpoint}");
+            } else {
+                println!("{endpoint} was already ignored");
+            }
+        }
+        IgnoreAction::Rm { destination } => {
+            let endpoint = connect::endpoint_of(&destination)?;
+            if !db.unignore(&endpoint)? {
+                bail!("{endpoint} is not ignored (see `sshh ignore`)");
+            }
+            println!("The wizard will ask again for {endpoint}");
+        }
+    }
+    Ok(())
 }
 
 fn themes_cmd(action: ThemesAction) -> Result<()> {
