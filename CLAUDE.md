@@ -72,7 +72,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
-  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active pane. Panes: `Alt-v` new column, `Alt--` new pane
+  `f`, `x`, `o`, `R`, `T`, `Tab`, `?`; the help = `Mode::Help(HelpState)` over the `app::HELP` table:
+  scroll + less-style `/` fuzzy search with `n`/`N`). `Tab`/`Shift-Tab` cycle list → details → active pane. Panes: `Alt-v` new column, `Alt--` new pane
   below the last column, `Alt-h/j/k/l` (+ arrows) focus like vim, `Alt-1..9` jump to column,
   `Alt-J` stack below the right (or left) column, `Alt-K` unstack, `Alt-H/L` move column, `Alt-n/p`
   change the pane's session, `Alt-w` close pane, `Alt-f`/`Alt-z` full screen (zoom), `Alt-a` broadcast (`App::broadcast`:
@@ -111,7 +112,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `vX.Y.Z` (must match Cargo.toml), builds `make dist` for x86_64 and aarch64 musl and
   aarch64-apple-darwin (`MACOSX_DEPLOYMENT_TARGET` 11.0) and publishes `sshh-<target>.tar.gz` + `.sha256`
   (no version in the name, so `releases/latest/download/...` works); the release body is the
-  version's section of CHANGES.md (`scripts/release-notes.sh vX.Y.Z`; the build fails without it). License: MIT OR Apache-2.0.
+  version's section of CHANGES.md (`scripts/release-notes.sh vX.Y.Z`; the build fails without it);
+  then the crate goes to crates.io (see below). License: MIT OR Apache-2.0.
 - Versions: `make version` alone shows the current version, the latest tag and the next ones;
   `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh, GNU and BSD
   tools: no `sed -i`, use its `rewrite`) updates Cargo.toml, Cargo.lock, the man page `.TH` line and
@@ -119,7 +121,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   "bump to vX.Y.Z"; then tag + push.
 - crates.io: the package is `sshh-tui` (`sshh` is taken) with `[[bin]] name = "sshh"`;
   `[package.metadata.binstall]` points to the release tarballs (keep it in sync with their names).
-  `cargo publish` after pushing the release tag; `exclude` keeps CI/scripts out of the crate.
+  `release.yml` publishes it after the GitHub Release (job `publish`, `needs: release`) with
+  Trusted Publishing (`rust-lang/crates-io-auth-action`, environment `crates-io`, no token stored):
+  never `cargo publish` by hand. `exclude` keeps CI/scripts out of the crate.
 - Install: `make build && make install` (PREFIX defaults to `~/.local`; `install` never builds;
   plain `make` only lists the targets, documented with `## ` comments in the Makefile), or
   `install.sh` (POSIX sh, used as `curl … | sh`): downloads the release tarball for Linux

@@ -331,7 +331,7 @@ List and general keys:
 | `o` | change sort order: recent → most used → alphabetical |
 | `R` | reload the list |
 | `T` | choose the [theme](#themes): moving shows it, `Enter` saves it, `Esc` goes back to the one you had |
-| `?` | help |
+| `?` | help: `j`/`k`, `Ctrl-d`/`Ctrl-u`, `gg`/`G` or the wheel scroll it; `/` searches it (fuzzy, matches highlighted), `n`/`N` go to the next/previous match; `Esc` clears the search, then closes it (also `q` or `?`) |
 | `Esc` | go back one level / clear the search (never quits) |
 | `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
 
@@ -820,6 +820,11 @@ The release workflow checks that the tag matches `Cargo.toml` and that `CHANGES.
 it, runs the tests and publishes static binaries for x86_64 and aarch64 Linux and a binary for macOS
 on Apple Silicon, with their SHA-256 checksums. The release notes are that version's section of
 `CHANGES.md` (`scripts/release-notes.sh v0.2.0` prints them).
+
+After the GitHub Release, the same workflow publishes the crate (`sshh-tui`) on crates.io with
+[Trusted Publishing](https://crates.io/docs/trusted-publishing): no API token is stored in the
+repository. If that step fails, the GitHub Release is already published; run the `publish` job again
+once it's fixed.
 
 ## License
 
