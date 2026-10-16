@@ -2,6 +2,11 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
+## Unreleased
+
+- The help (`?`) scrolls (`j`/`k`, `Ctrl-d`/`Ctrl-u`, `gg`/`G`, wheel) and `/` searches it: matches are
+  highlighted and `n`/`N` jump between them ([#12](https://github.com/ewiggin/sshh/issues/12)).
+
 ## 0.9.0 — 2026-10-16
 
 - **Themes.** Besides the default `terminal` theme (the terminal's own colors), sshh ships
