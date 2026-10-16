@@ -15,7 +15,7 @@ use std::{env, fs};
 use anyhow::{Context, Result, anyhow};
 
 use crate::db::Db;
-use crate::model::{Host, HostData, config_value, tmux_command, validate_alias};
+use crate::model::{Endpoint, Host, HostData, config_value, local_user, tmux_command, validate_alias};
 use crate::ssh_args::{self, Destination, SshInvocation};
 use crate::tui::{self, WizardOutcome};
 
@@ -88,6 +88,11 @@ fn prepare(
             if inv.info_only || !wizard_enabled() {
                 return Ok(Some(args.to_vec()));
             }
+            let endpoint = target.endpoint();
+            if db.is_ignored(&endpoint)? {
+                debug(format_args!("'{endpoint}' is ignored: no wizard"));
+                return Ok(Some(args.to_vec()));
+            }
             let prefill = prefill(dest, inv, &target);
             match tui::wizard(&mut db, &prefill, &dest.to_string())? {
                 WizardOutcome::Saved(id) => {
@@ -95,6 +100,11 @@ fn prepare(
                     (id, args.to_vec())
                 }
                 WizardOutcome::Skipped => return Ok(Some(args.to_vec())),
+                WizardOutcome::Ignored => {
+                    db.ignore(&endpoint)?;
+                    eprintln!("sshh: won't ask again for {endpoint} (undo with `sshh ignore rm {endpoint}`)");
+                    return Ok(Some(args.to_vec()));
+                }
                 WizardOutcome::Aborted => return Ok(None),
             }
         }
@@ -128,9 +138,6 @@ fn wizard_enabled() -> bool {
         && std::io::stderr().is_terminal()
 }
 
-fn local_user() -> String {
-    env::var("USER").or_else(|_| env::var("LOGNAME")).unwrap_or_default()
-}
 
 /// Asks `ssh -G` for the effective destination; if that fails, uses what is in
 /// the arguments.
@@ -151,6 +158,26 @@ fn resolve_target(args: &[String], inv: &SshInvocation, dest: &Destination) -> T
         port: inv.effective_port().unwrap_or(22),
         proxy_jump: inv.jump.clone(),
     })
+}
+
+impl Target {
+    fn endpoint(&self) -> Endpoint {
+        Endpoint { user: self.user.clone(), hostname: self.hostname.clone(), port: self.port }
+    }
+}
+
+/// Where a destination typed by the user connects: `user@hostname:port` as is,
+/// otherwise resolved like the wrapper does (`ssh -G`, so ssh_config applies).
+pub fn endpoint_of(destination: &str) -> Result<Endpoint> {
+    if let Some(endpoint) = Endpoint::parse(destination) {
+        return Ok(endpoint);
+    }
+    let args = [destination.to_string()];
+    let inv = ssh_args::parse(&args).map_err(|e| anyhow!("'{destination}': {e}"))?;
+    let Some((_, dest)) = &inv.destination else {
+        return Err(anyhow!("'{destination}' is not a destination"));
+    };
+    Ok(resolve_target(&args, &inv, dest).endpoint())
 }
 
 fn parse_ssh_g(output: &str) -> Option<Target> {

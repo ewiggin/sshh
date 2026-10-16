@@ -55,6 +55,8 @@ pub enum FormEvent {
     Cancel,
     /// Edit the focused multiline field with $EDITOR.
     Editor,
+    /// Wizard: connect without saving and never ask for this destination again.
+    Ignore,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -263,6 +265,7 @@ impl Form {
             KeyCode::Esc => return FormEvent::Cancel,
             KeyCode::Char('c') if ctrl => return FormEvent::Cancel,
             KeyCode::Char('s') if ctrl => return FormEvent::Submit,
+            KeyCode::Char('n') if ctrl && self.kind == FormKind::Wizard => return FormEvent::Ignore,
             KeyCode::Char('e') if ctrl && multiline => return FormEvent::Editor,
             KeyCode::Enter if multiline => field.insert('\n'),
             KeyCode::Enter => return FormEvent::Submit,
@@ -338,11 +341,17 @@ impl Form {
         } else {
             hints.push(("Enter", "save"));
         }
-        hints.push(("Tab/↑↓", "field"));
-        hints.push(match self.kind {
-            FormKind::Wizard => ("Esc", "connect without saving"),
-            _ => ("Esc", "cancel"),
-        });
+        let wizard = self.kind == FormKind::Wizard;
+        // The wizard's hints are longer; in multiline fields there's no room
+        // for this one.
+        if !(wizard && Self::is_multiline(self.focus)) {
+            hints.push(("Tab/↑↓", "field"));
+        }
+        if wizard {
+            hints.extend([("Esc", "connect without saving"), ("Ctrl-n", "never ask")]);
+        } else {
+            hints.push(("Esc", "cancel"));
+        }
         hints
     }
 
@@ -503,6 +512,10 @@ mod tests {
         assert_eq!(form.focused().value, "a\nbc");
         assert_eq!(form.on_key(ctrl('e')), FormEvent::Editor);
         assert_eq!(form.on_key(ctrl('s')), FormEvent::Submit);
+        // Ctrl-n (never ask) only exists in the wizard.
+        assert_eq!(form.on_key(ctrl('n')), FormEvent::None);
+        let mut wizard = Form::new(FormKind::Wizard, &HostData::default());
+        assert_eq!(wizard.on_key(ctrl('n')), FormEvent::Ignore);
     }
 
     #[test]

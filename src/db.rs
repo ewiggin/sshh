@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::model::{Host, HostData};
+use crate::model::{Endpoint, Host, HostData, local_user};
 
 /// Migrations in order; `PRAGMA user_version` stores how many have been applied.
 const MIGRATIONS: &[&str] = &[r#"
@@ -58,6 +58,14 @@ CREATE TABLE layout_panes (
 );
 "#, r#"
 ALTER TABLE hosts ADD COLUMN tmux_session TEXT;
+"#, r#"
+CREATE TABLE ignored (
+    user       TEXT NOT NULL,
+    hostname   TEXT NOT NULL COLLATE NOCASE,
+    port       INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user, hostname, port)
+);
 "#];
 
 const HOST_SELECT: &str = "
@@ -209,6 +217,47 @@ impl Db {
         let mut stmt = self.conn.prepare(&sql)?;
         let hosts = stmt.query_map([], host_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
         hosts.into_iter().map(|h| with_tags(&self.conn, h)).collect()
+    }
+
+    /// Never open the wizard for `target` again. Returns false if it already was.
+    pub fn ignore(&self, target: &Endpoint) -> Result<bool> {
+        let added = self.conn.execute(
+            "INSERT OR IGNORE INTO ignored (user, hostname, port, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![target.user, target.hostname, target.port, now()],
+        )?;
+        Ok(added > 0)
+    }
+
+    /// Returns false if `target` wasn't ignored.
+    pub fn unignore(&self, target: &Endpoint) -> Result<bool> {
+        let removed = self.conn.execute(
+            "DELETE FROM ignored WHERE user = ?1 AND hostname = ?2 AND port = ?3",
+            params![target.user, target.hostname, target.port],
+        )?;
+        Ok(removed > 0)
+    }
+
+    pub fn is_ignored(&self, target: &Endpoint) -> Result<bool> {
+        let found = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM ignored WHERE user = ?1 AND hostname = ?2 AND port = ?3",
+                params![target.user, target.hostname, target.port],
+                |_| Ok(()),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    /// Ignored destinations with the date they were ignored, by hostname.
+    pub fn list_ignored(&self) -> Result<Vec<(Endpoint, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT user, hostname, port, created_at FROM ignored ORDER BY hostname, user, port")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((Endpoint { user: r.get(0)?, hostname: r.get(1)?, port: r.get(2)? }, r.get(3)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn record_connection(&self, host_id: i64, args: &[String]) -> Result<()> {
@@ -371,11 +420,13 @@ fn insert_in(conn: &Connection, data: &HostData) -> Result<i64> {
     check_alias_conflict(inserted, &data.alias)?;
     let id = conn.last_insert_rowid();
     set_tags(conn, id, &data.tags)?;
+    unignore_saved(conn, data)?;
     Ok(id)
 }
 
 fn update_in(conn: &Connection, id: i64, data: &HostData) -> Result<()> {
     data.validate()?;
+    unignore_saved(conn, data)?;
     let updated = conn.execute(
         "UPDATE hosts SET alias = ?2, hostname = ?3, user = ?4, port = ?5, identity_file = ?6,
                           proxy_jump = ?7, extra_options = ?8, name = ?9, description = ?10,
@@ -468,6 +519,16 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+/// A saved destination is no longer ignored (the wizard wouldn't show anyway).
+fn unignore_saved(conn: &Connection, data: &HostData) -> Result<()> {
+    let user = data.user.clone().unwrap_or_else(local_user);
+    conn.execute(
+        "DELETE FROM ignored WHERE user = ?1 AND hostname = ?2 AND port = ?3",
+        params![user, data.hostname, data.port.unwrap_or(22)],
+    )?;
+    Ok(())
+}
+
 fn set_tags(conn: &Connection, host_id: i64, tags: &[String]) -> Result<()> {
     conn.execute("DELETE FROM host_tags WHERE host_id = ?1", [host_id])?;
     for tag in tags.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
@@ -531,6 +592,37 @@ mod tests {
             tags: vec!["prod".into(), "db".into()],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn ignored_destinations() {
+        let mut db = Db::open_in_memory().unwrap();
+        let target = Endpoint { user: "root".into(), hostname: "10.0.0.1".into(), port: 22 };
+        assert!(!db.is_ignored(&target).unwrap());
+        assert!(db.ignore(&target).unwrap());
+        assert!(!db.ignore(&target).unwrap());
+        assert!(db.is_ignored(&target).unwrap());
+        // The hostname is compared without case; user and port must match.
+        assert!(db.is_ignored(&Endpoint { hostname: "10.0.0.1".into(), ..target.clone() }).unwrap());
+        let other_port = Endpoint { port: 2222, ..target.clone() };
+        assert!(!db.is_ignored(&other_port).unwrap());
+        db.ignore(&other_port).unwrap();
+        let listed: Vec<String> = db.list_ignored().unwrap().iter().map(|(e, _)| e.to_string()).collect();
+        assert_eq!(listed, ["root@10.0.0.1:22", "root@10.0.0.1:2222"]);
+        // Saving the destination takes it out of the list.
+        db.insert_host(&sample("db1")).unwrap();
+        assert!(!db.is_ignored(&target).unwrap());
+        assert!(db.is_ignored(&other_port).unwrap());
+        assert!(db.unignore(&other_port).unwrap());
+        assert!(!db.unignore(&other_port).unwrap());
+        assert!(db.list_ignored().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ignored_case_insensitive_hostname() {
+        let db = Db::open_in_memory().unwrap();
+        db.ignore(&Endpoint { user: "u".into(), hostname: "Web.Example.com".into(), port: 22 }).unwrap();
+        assert!(db.is_ignored(&Endpoint { user: "u".into(), hostname: "web.example.com".into(), port: 22 }).unwrap());
     }
 
     #[test]

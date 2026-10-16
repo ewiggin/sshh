@@ -419,6 +419,8 @@ pub enum WizardOutcome {
     Saved(i64),
     /// Connect without saving.
     Skipped,
+    /// Ctrl-n: connect without saving and don't ask again.
+    Ignored,
     /// Ctrl-c: don't connect.
     Aborted,
 }
@@ -437,6 +439,7 @@ pub fn wizard(db: &mut Db, prefill: &HostData, destination: &str) -> Result<Wiza
     Ok(match end? {
         FormEnd::Saved(id, _) => WizardOutcome::Saved(id),
         FormEnd::Cancelled => WizardOutcome::Skipped,
+        FormEnd::Ignored => WizardOutcome::Ignored,
         FormEnd::Aborted => WizardOutcome::Aborted,
     })
 }
@@ -451,7 +454,7 @@ pub fn add_form(db: &mut Db, prefill: &HostData) -> Result<Option<HostData>> {
     term::restore();
     Ok(match end? {
         FormEnd::Saved(_, data) => Some(*data),
-        FormEnd::Cancelled | FormEnd::Aborted => None,
+        FormEnd::Cancelled | FormEnd::Ignored | FormEnd::Aborted => None,
     })
 }
 
@@ -459,6 +462,8 @@ enum FormEnd {
     Saved(i64, Box<HostData>),
     /// Esc.
     Cancelled,
+    /// Ctrl-n in the wizard.
+    Ignored,
     /// Ctrl-c.
     Aborted,
 }
@@ -490,6 +495,7 @@ fn form_loop(
                 match form.on_key(key) {
                     FormEvent::None => {}
                     FormEvent::Cancel => return Ok(FormEnd::Cancelled),
+                    FormEvent::Ignore => return Ok(FormEnd::Ignored),
                     FormEvent::Editor => edit_focused(terminal, form),
                     FormEvent::Submit => {
                         if let Some(data) = form.submit() {

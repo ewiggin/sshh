@@ -29,7 +29,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   destination only for what the user didn't set. Otherwise resolves the effective destination with
   `ssh -G` (applies ssh_config) and looks it up by `user@hostname:port`; on a match, passes args
   untouched. If it's not saved and the session is interactive, opens the wizard (`SSHH_NO_WIZARD=1`
-  disables it). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
+  disables it; `Ctrl-n` there = `WizardOutcome::Ignored` → table `ignored` (`model::Endpoint`
+  `user@hostname:port`, hostname NOCASE), skipped silently next time; `insert_in`/`update_in` remove
+  the saved destination from it; `sshh ignore` list/add/rm via `connect::endpoint_of`). `-G/-V/-O/-Q` (`info_only`) neither open the wizard nor count in the history.
   `HostData::tmux_session`: `with_tmux` adds `-t` + `model::tmux_command` (remote
   `tmux new-session -A`) only for interactive shells (`SshInvocation::interactive_shell`, a tty in
   wrapper mode); never in tool_args (sftp, ssh-copy-id) nor in the generated include file.
