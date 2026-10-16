@@ -2,7 +2,7 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.9.3 — 2026-10-17
 
 - `Ctrl-n` in the wizard connects without saving and never asks again for that destination (for
   temporary IPs, CI machines…). `sshh ignore` lists them, `sshh ignore add <dest>` adds one and
