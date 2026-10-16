@@ -494,13 +494,15 @@ Scrollback is tmux's, not history mode.
 .B ls
 List the saved connections.
 .TP
-.BI add " alias destination " [ options ]
+.BI add " \fR[\fPalias\fR] [\fPdestination\fR] [\fPoptions\fR]\fP"
 Save a connection.
 .I destination
 is
 .I [user@]host
 or
 .IR ssh://[user@]host[:port] .
+Without a destination it opens the add form of the TUI, prefilled with the
+alias and options given (it needs a terminal); Enter saves and Esc cancels.
 Options:
 .BI \-p " port" ,
 .BI \-i " identity" ,

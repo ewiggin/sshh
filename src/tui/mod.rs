@@ -386,43 +386,73 @@ pub enum WizardOutcome {
 /// Form to save a new connection before connecting.
 pub fn wizard(db: &mut Db, prefill: &HostData, destination: &str) -> Result<WizardOutcome> {
     let mut form = Form::new(FormKind::Wizard, prefill);
+    let header = Line::from(vec![
+        " sshh: ".bold(),
+        destination.to_string().fg(ui::ACCENT).bold(),
+        " is not saved. Save it before connecting?".into(),
+    ]);
     let mut terminal = term::init()?;
-    let outcome = wizard_loop(&mut terminal, db, &mut form, destination);
+    let end = form_loop(&mut terminal, db, &mut form, Some(header));
     term::restore();
-    outcome
+    Ok(match end? {
+        FormEnd::Saved(id, _) => WizardOutcome::Saved(id),
+        FormEnd::Cancelled => WizardOutcome::Skipped,
+        FormEnd::Aborted => WizardOutcome::Aborted,
+    })
 }
 
-fn wizard_loop(
+/// The add form on its own, for `sshh add` without a destination. Returns what
+/// was saved, or `None` if it was cancelled.
+pub fn add_form(db: &mut Db, prefill: &HostData) -> Result<Option<HostData>> {
+    let focus = if prefill.alias.is_empty() { form::ALIAS } else { form::HOSTNAME };
+    let mut form = Form::new(FormKind::Add, prefill).focus(focus);
+    let mut terminal = term::init()?;
+    let end = form_loop(&mut terminal, db, &mut form, None);
+    term::restore();
+    Ok(match end? {
+        FormEnd::Saved(_, data) => Some(*data),
+        FormEnd::Cancelled | FormEnd::Aborted => None,
+    })
+}
+
+enum FormEnd {
+    Saved(i64, Box<HostData>),
+    /// Esc.
+    Cancelled,
+    /// Ctrl-c.
+    Aborted,
+}
+
+/// Runs a standalone form (outside the TUI) until it is saved or cancelled,
+/// with an optional header line above it.
+fn form_loop(
     terminal: &mut DefaultTerminal,
     db: &mut Db,
     form: &mut Form,
-    destination: &str,
-) -> Result<WizardOutcome> {
+    header: Option<Line>,
+) -> Result<FormEnd> {
     loop {
         terminal.draw(|frame| {
-            let [header, _] =
-                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(frame.area());
-            let text = Line::from(vec![
-                " sshh: ".bold(),
-                destination.to_string().fg(ui::ACCENT).bold(),
-                " is not saved. Save it before connecting?".into(),
-            ]);
-            frame.render_widget(text, header);
+            if let Some(header) = &header {
+                let [area, _] =
+                    Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(frame.area());
+                frame.render_widget(header, area);
+            }
             form.render(frame);
         })?;
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                    return Ok(WizardOutcome::Aborted);
+                    return Ok(FormEnd::Aborted);
                 }
                 match form.on_key(key) {
                     FormEvent::None => {}
-                    FormEvent::Cancel => return Ok(WizardOutcome::Skipped),
+                    FormEvent::Cancel => return Ok(FormEnd::Cancelled),
                     FormEvent::Editor => edit_focused(terminal, form),
                     FormEvent::Submit => {
                         if let Some(data) = form.submit() {
                             match db.insert_host(&data) {
-                                Ok(id) => return Ok(WizardOutcome::Saved(id)),
+                                Ok(id) => return Ok(FormEnd::Saved(id, Box::new(data))),
                                 Err(e) => form.error = Some(format!("{e:#}")),
                             }
                         }

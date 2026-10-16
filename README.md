@@ -460,6 +460,7 @@ Besides the TUI, there are subcommands for scripts or quick use:
 ```sh
 sshh ls                                      # list as text
 sshh add <alias> <destination> [options]     # save a connection
+sshh add [alias] [options]                   # same, in the add form (prefilled with what you give)
 sshh rm <alias>                              # delete a connection
 sshh history [alias] [-n N]                  # latest connections
 sshh export [-o file]                        # export to JSON
@@ -468,6 +469,9 @@ sshh import-ssh-config [file]                # import the Host blocks of ~/.ssh/
 sshh ssh-config [status|sync|print|disable]  # generated ssh_config file (see below)
 sshh --help                                  # help (also `sshh <subcommand> --help`)
 ```
+
+Without a destination, `sshh add` opens the same add form as the TUI, prefilled with the alias and
+options you passed (it needs a terminal). Enter saves it and Esc cancels.
 
 `sshh add` options:
 
