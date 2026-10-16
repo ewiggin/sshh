@@ -319,7 +319,7 @@ List and general keys:
 | `o` | change sort order: recent → most used → alphabetical |
 | `R` | reload the list |
 | `T` | choose the [theme](#themes): moving shows it, `Enter` saves it, `Esc` goes back to the one you had |
-| `?` | help |
+| `?` | help: `j`/`k`, `Ctrl-d`/`Ctrl-u`, `gg`/`G` or the wheel scroll it; `/` searches it (fuzzy, matches highlighted), `n`/`N` go to the next/previous match; `Esc` clears the search, then closes it (also `q` or `?`) |
 | `Esc` | go back one level / clear the search (never quits) |
 | `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
 

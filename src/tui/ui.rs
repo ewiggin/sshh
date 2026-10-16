@@ -14,6 +14,7 @@ use tui_term::widget::{Cursor, PseudoTerminal};
 
 use super::app::{
     App, Focus, ListTab, MIN_COLUMN_WIDTH, Mode, Pane, SessionKey, SessionKind, SessionState, ThemePicker,
+    HELP, HelpState,
 };
 use super::session::Session;
 use crate::cli::{format_date, relative_time, short_age};
@@ -83,7 +84,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
     }
     draw_footer(frame, app, footer);
     match &mut app.mode {
-        Mode::Help => draw_help(frame),
+        Mode::Help(help) => draw_help(frame, help),
         Mode::Form(form) => form.render(frame),
         Mode::ConfirmDelete { alias } => draw_confirm(
             frame,
@@ -865,55 +866,47 @@ fn draw_layout_name(frame: &mut Frame, name: &str, rename: bool) {
     frame.render_widget(Paragraph::new(format!(" {name}█")).block(block), area);
 }
 
-fn draw_help(frame: &mut Frame) {
-    const HELP: &[(&str, &str)] = &[
-        ("Space", "show the connection in the active pane"),
-        ("Alt-v", "show it in a new column, right of the active one"),
-        ("Alt--", "show it in a new pane below the last column"),
-        ("Alt-h/j/k/l", "focus left / down / up / right (also Alt-arrows)"),
-        ("Alt-1 … Alt-9", "jump to column N"),
-        ("Alt-J", "stack the pane below the column on its right (or left)"),
-        ("Alt-K", "take the pane out into its own column"),
-        ("Alt-H / Alt-L", "move the column left / right"),
-        ("Alt-n / Alt-p", "next / previous session in the pane"),
-        ("Alt-w", "close the pane (the session keeps running)"),
-        ("Alt-f / Alt-z", "full screen for the active pane (toggle)"),
-        ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
-        ("Alt-a", "broadcast: type in every visible pane (toggle)"),
-        ("x", "close the connection's sessions (ssh and sftp)"),
-        ("f", "full-screen ssh (back to sshh on exit)"),
-        ("", ""),
-        ("j/k ↑/↓", "move"),
-        ("gg / G", "go to top / bottom"),
-        ("Ctrl-d/u", "half page down / up"),
-        ("Ctrl-f/b", "page down / up"),
-        ("Tab / S-Tab", "next / previous pane (list, details, terminal)"),
-        ("/", "search (filters while typing; #tag by tag)"),
-        ("[ / ]", "tabs: connections / tags / layouts"),
-        ("Space (on a tag)", "filter the connections by it"),
-        ("Alt-v (on a tag)", "open all its connections in panes"),
-        ("Layouts tab", "a saves the panes, Space opens, r renames, dd deletes"),
-        ("Esc", "back / clear search"),
-        ("", ""),
-        ("a", "add connection"),
-        ("Enter / e, t", "edit / edit tags"),
-        ("dd", "delete (asks for confirmation)"),
-        ("yy", "copy the ssh command"),
-        ("s", "sftp in a new column, next to the ssh one"),
-        ("c", "install your public key (ssh-copy-id)"),
-        ("o", "change sort (recent / most used / alphabetical)"),
-        ("R", "reload"),
-        ("T", "theme (shown while moving, Enter saves)"),
-        ("q / Ctrl-c", "quit"),
-        ("", ""),
-        ("Click", "select · double click connects"),
-        ("Wheel", "move · scroll details or session history"),
-    ];
+/// The help, scrollable, with the matches of its search highlighted.
+fn draw_help(frame: &mut Frame, help: &mut HelpState) {
+    let area = centered(frame.area(), 74, (HELP.len() as u16 + 2).min(frame.area().height));
+    help.height = usize::from(area.height.saturating_sub(2));
+    help.clamp_scroll();
+    let current = help.current_line();
     let lines: Vec<Line> = HELP
         .iter()
-        .map(|(k, desc)| Line::from(vec![format!(" {k:<16}").fg(ACCENT).bold(), (*desc).into()]))
+        .enumerate()
+        .skip(help.scroll)
+        .take(help.height)
+        .map(|(i, (k, desc))| {
+            let (key_hl, desc_hl) = help.highlights(i);
+            let key = format!("{k:<17}");
+            let mut spans = vec![Span::raw(" ")];
+            // The key keeps its color; the matched chars take the match color.
+            let base = Style::new().fg(ACCENT).bold();
+            spans.extend(
+                highlighted(&key, key_hl)
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.into_owned(), base.patch(s.style))),
+            );
+            spans.extend(highlighted(desc, desc_hl));
+            let line = Line::from(spans);
+            if current == Some(i) { line.style(Style::new().add_modifier(Modifier::REVERSED)) } else { line }
+        })
         .collect();
-    let area = centered(frame.area(), 72, lines.len() as u16 + 2);
+    let mut title = "Help".to_string();
+    if help.typing {
+        title.push_str(&format!(" · /{}█", help.query));
+    } else if !help.query.is_empty() {
+        title.push_str(&format!(" · /{}", help.query));
+    }
+    if !help.query.is_empty() {
+        match help.current {
+            Some(c) => title.push_str(&format!(" {}/{}", c + 1, help.matches.len())),
+            None => title.push_str(" · no matches"),
+        }
+    }
+    let hints = if help.typing { " Enter keep · Esc cancel " } else { " / search · n/N · j/k scroll · Esc " };
+    let block = block(&title, true).title_bottom(Line::from(hints.dim()).right_aligned());
     frame.render_widget(Clear, area);
-    frame.render_widget(Paragraph::new(lines).block(block("Help", true)), area);
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }

@@ -70,7 +70,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
-  `f`, `x`, `o`, `R`, `Tab`, `?`). `Tab`/`Shift-Tab` cycle list → details → active pane. Panes: `Alt-v` new column, `Alt--` new pane
+  `f`, `x`, `o`, `R`, `T`, `Tab`, `?`; the help = `Mode::Help(HelpState)` over the `app::HELP` table:
+  scroll + less-style `/` fuzzy search with `n`/`N`). `Tab`/`Shift-Tab` cycle list → details → active pane. Panes: `Alt-v` new column, `Alt--` new pane
   below the last column, `Alt-h/j/k/l` (+ arrows) focus like vim, `Alt-1..9` jump to column,
   `Alt-J` stack below the right (or left) column, `Alt-K` unstack, `Alt-H/L` move column, `Alt-n/p`
   change the pane's session, `Alt-w` close pane, `Alt-f`/`Alt-z` full screen (zoom), `Alt-a` broadcast (`App::broadcast`:
