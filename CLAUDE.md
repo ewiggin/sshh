@@ -89,6 +89,19 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Workflow for every change: 1) make the change (code + tests + docs above), 2) commit it,
   3) add its release note under `## Unreleased` in `CHANGES.md` (create the section if the last
   release removed it; user-visible changes only) and commit that too.
+
+## Task workflow
+Features and bugs are GitHub issues on the project board "sshh" (`gh project … 6 --owner ewiggin`;
+Status: LATER, NEXT, NOW, In Progress, Review, Done; Size: S/M/L/XL).
+- The user prioritizes and moves cards from NEXT to NOW. Only take tasks that are in **NOW**.
+- Start: a branch per task linked to the issue (`gh issue develop <n> --name <n>-short-slug
+  --base main`), assign the issue (`gh issue edit <n> --add-assignee @me`), move the card to
+  **In Progress** (`gh project item-edit 6 --owner ewiggin --url <issue url> --field Status --value
+  "In Progress"`). Work and commit on that branch (change, then its `CHANGES.md` note), never on main.
+- Finish: push the branch, move the card to **Review** and tell the user; they open the PR (with
+  `Closes #<n>`) and review it.
+- Review feedback: apply the requested changes on the same branch and push.
+- The user merges the PR; only then move the card to **Done** (the issue closes via `Closes #<n>`).
 - Static build: `make static` / `make install-static` / `make dist` (musl target
   `x86_64-unknown-linux-musl`, needs `musl-gcc` for bundled SQLite; tests also pass with
   `cargo test --target x86_64-unknown-linux-musl`). Release profile has `strip = true`.
