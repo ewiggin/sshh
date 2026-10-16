@@ -5,6 +5,7 @@ mod include;
 mod model;
 mod ssh_args;
 mod ssh_config;
+mod theme;
 mod tui;
 
 use std::ffi::OsString;

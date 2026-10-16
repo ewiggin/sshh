@@ -21,7 +21,7 @@ use ratatui::text::Line;
 
 use crate::db::Db;
 use crate::model::{Host, HostData};
-use crate::{connect, include};
+use crate::{connect, include, theme};
 use app::{App, External, Focus, Mode, Outcome, Request, SessionKey, SessionKind, SessionState};
 use form::{Form, FormEvent, FormKind};
 use session::{CopyAction, Session};
@@ -33,6 +33,11 @@ pub fn run() -> Result<()> {
     let mut db = Db::open_default()?;
     let mut app = App::new(db.list_hosts()?);
     app.set_layouts(db.list_layouts()?, None);
+    let (theme, warning) = theme::current();
+    app.theme = theme;
+    if let Some(warning) = warning {
+        app.error(warning);
+    }
     let mut sessions = Sessions::new();
     let mut terminal = term::init()?;
     let outcome = event_loop(&mut terminal, &mut db, &mut app, &mut sessions);
@@ -357,8 +362,43 @@ fn handle_request(
             }
         }
         Request::External { program, host } => run_external(terminal, db, app, program, &host)?,
+        Request::Themes => open_themes(app),
+        Request::SaveTheme(name) => match theme::save(&name) {
+            Ok(path) => {
+                let mut text = format!("Theme '{name}' saved in {}", path.display());
+                if std::env::var("SSHH_THEME").is_ok_and(|t| !t.is_empty()) {
+                    text.push_str(" ($SSHH_THEME overrides it)");
+                }
+                app.info(text);
+            }
+            Err(e) => app.error(format!("Could not save the theme: {e:#}")),
+        },
     }
     Ok(())
+}
+
+/// Loads every theme for the picker; those that fail are left out and reported.
+fn open_themes(app: &mut App) {
+    let list = match theme::list() {
+        Ok(list) => list,
+        Err(e) => {
+            app.error(format!("{e:#}"));
+            return;
+        }
+    };
+    let depth = theme::Depth::detect();
+    let mut themes = Vec::new();
+    let mut failed = Vec::new();
+    for (name, source) in &list {
+        match theme::from_source(name, source, depth) {
+            Ok(theme) => themes.push((theme, matches!(source, theme::Source::User { .. }))),
+            Err(e) => failed.push(format!("{e:#}")),
+        }
+    }
+    app.open_themes(themes);
+    if !failed.is_empty() {
+        app.error(format!("Skipped: {}", failed.join("; ")));
+    }
 }
 
 fn refresh_include(db: &Db, app: &mut App) {
@@ -431,6 +471,7 @@ fn form_loop(
     form: &mut Form,
     header: Option<Line>,
 ) -> Result<FormEnd> {
+    let (theme, _) = theme::current();
     loop {
         terminal.draw(|frame| {
             if let Some(header) = &header {
@@ -439,6 +480,7 @@ fn form_loop(
                 frame.render_widget(header, area);
             }
             form.render(frame);
+            theme.apply(frame.buffer_mut());
         })?;
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {

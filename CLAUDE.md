@@ -15,8 +15,11 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   exists; `include::refresh` after every DB change). **`~/.ssh/config` is never modified**: the user
   adds `Include config.d/sshh.conf` at the top by hand (after a `Host` it would be conditional to
   that block).
-- Colors: only the 16 ANSI colors + default fg/bg + modifiers (no `Color::Indexed`/`Rgb`), so the UI
-  follows the terminal theme (Omarchy themes set the palette; color4/blue = accent).
+- Colors: draw only with the 16 ANSI colors + default fg/bg + modifiers (no `Color::Indexed`/`Rgb`),
+  so with the default `terminal` theme the UI follows the terminal theme (Omarchy themes set the
+  palette; color4/blue = accent). Other themes (`theme.rs`) recolor the buffer after drawing
+  (`Theme::apply`): named colors = sshh's UI (overridable roles in `[ui]`), `Indexed(0..15)` = the
+  panes (tui-term), both from the palette; 256/RGB from remote programs untouched.
 - Option values: use `model::config_value` (only quotes single-value options; multi-argument ones
   like `LocalForward 8080 host:80` must not be quoted).
 
@@ -75,6 +78,11 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   avoid taking more readline Alt keys (`Alt-.`, `b`, `d`, `<`, `>`).
   With the terminal focused every other key goes to ssh. `Esc` always goes back one level (except in
   the terminal); only `q`/`Ctrl-c` quit (confirming if sessions are alive).
+- `theme`: themes = TOML (`themes/*.toml` embedded with `include_str!` + the user's
+  `$XDG_CONFIG_HOME/sshh/themes/<name>.toml`, which win). Chosen by `$SSHH_THEME`, then `theme` in
+  `$XDG_CONFIG_HOME/sshh/config.toml` (`theme::save` rewrites only that line; `T` in the TUI =
+  `Mode::Themes`, preview while moving, `Request::SaveTheme`). Without `COLORTERM=truecolor|24bit`
+  RGB becomes the nearest 256 color. A broken theme warns and falls back to `terminal`.
 - `cli`: own subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`,
   `ssh-config`); their names are in `model::RESERVED_ALIASES` (add any new subcommand there).
 - `ssh_config`: ssh_config parser to import concrete `Host`s (follows `Include`, ignores wildcards,

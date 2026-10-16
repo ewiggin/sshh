@@ -128,7 +128,7 @@ pub struct Host {
 
 /// sshh's own subcommands; they cannot be used as aliases.
 pub const RESERVED_ALIASES: &[&str] =
-    &["ls", "add", "rm", "help", "history", "export", "import", "import-ssh-config", "ssh-config"];
+    &["ls", "add", "rm", "help", "history", "export", "import", "import-ssh-config", "ssh-config", "themes"];
 
 /// tmux session names: letters, digits, `-` and `_`, so they need no quoting
 /// in the remote command (tmux itself rejects `:` and `.`).

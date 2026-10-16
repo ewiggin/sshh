@@ -9,10 +9,12 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, TableState, Wrap};
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use super::app::{App, Focus, ListTab, MIN_COLUMN_WIDTH, Mode, Pane, SessionKey, SessionKind, SessionState};
+use super::app::{
+    App, Focus, ListTab, MIN_COLUMN_WIDTH, Mode, Pane, SessionKey, SessionKind, SessionState, ThemePicker,
+};
 use super::session::Session;
 use crate::cli::{format_date, relative_time, short_age};
 use crate::connect::shell_quote;
@@ -21,7 +23,8 @@ use crate::model::{Host, HostData};
 
 // Only the 16 ANSI colors (plus the terminal's default foreground and
 // background), so the UI follows the terminal theme (e.g. Omarchy themes,
-// where color4 / blue is the primary accent).
+// where color4 / blue is the primary accent). Other sshh themes turn them
+// into RGB after drawing (`theme::Theme::apply`).
 pub const ACCENT: Color = Color::Blue;
 const MATCH: Color = Color::Yellow;
 const TAG: Color = Color::Magenta;
@@ -103,8 +106,31 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
             vec![format!("Close {sessions} open session(s) and quit?").into()],
             "quit",
         ),
+        Mode::Themes(picker) => draw_themes(frame, picker),
         _ => {}
     }
+    app.theme.apply(frame.buffer_mut());
+}
+
+/// Theme picker: the themes, the highlighted one already applied.
+fn draw_themes(frame: &mut Frame, picker: &ThemePicker) {
+    let rows = picker.themes.iter().map(|(theme, user)| {
+        Row::new([
+            Cell::from(theme.name.clone()),
+            Cell::from(Line::from(if *user { "user" } else { "" }).right_aligned().dim()),
+        ])
+    });
+    let height = (picker.themes.len() as u16 + 2).min(frame.area().height);
+    let area = centered(frame.area(), 40, height);
+    frame.render_widget(Clear, area);
+    let block = block("Theme", true)
+        .title_bottom(Line::from(" Enter save · Esc cancel ".dim()).right_aligned());
+    let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
+        .block(block)
+        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+        .highlight_spacing(HighlightSpacing::Never);
+    let mut state = TableState::default().with_selected(Some(picker.selected));
+    frame.render_stateful_widget(table, area, &mut state);
 }
 
 pub fn block(title: &str, focused: bool) -> Block<'_> {
@@ -877,6 +903,7 @@ fn draw_help(frame: &mut Frame) {
         ("c", "install your public key (ssh-copy-id)"),
         ("o", "change sort (recent / most used / alphabetical)"),
         ("R", "reload"),
+        ("T", "theme (shown while moving, Enter saves)"),
         ("q / Ctrl-c", "quit"),
         ("", ""),
         ("Click", "select · double click connects"),

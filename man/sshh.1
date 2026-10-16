@@ -406,6 +406,15 @@ Change the sort order: recent, most used, alphabetical.
 .B R
 Reload the list.
 .TP
+.B T
+Choose the theme (see
+.BR THEMES ):
+moving shows it,
+.B Enter
+saves it in the config file,
+.B Esc
+goes back to the previous one.
+.TP
 .B ?
 Show the help.
 .TP
@@ -589,6 +598,12 @@ block:
 Include config.d/sshh.conf
 .EE
 .RE
+.TP
+.BR themes " [" list | "show \fIname\fR" ]
+List the color themes, marking the one in use, or print the file of one
+(to start your own from it).
+See
+.BR THEMES .
 .SS Import options
 .B import
 and
@@ -603,6 +618,53 @@ exists: skip it (default), replace it, or import it as
 .TP
 .BR \-n ", " \-\-dry\-run
 Show what would be imported without saving anything.
+.SH THEMES
+The default theme,
+.BR terminal ,
+leaves the colors to the terminal palette.
+Any other theme sets the background, the foreground and the 16 ANSI colors
+of the whole screen, the panes included; programs that use 256 colors or
+truecolor keep theirs.
+Built-in themes:
+.BR gruvbox\-dark ", " gruvbox\-light
+(palette by Pavel Pertsev),
+.BR everforest\-dark ", " everforest\-light
+(sainnhe),
+.BR kanagawa\-wave ", " kanagawa\-dragon ", " kanagawa\-lotus
+(Tommaso Laurenzi),
+.B monokai
+(Wimer Hazenberg),
+.BR material ", " material\-palenight
+(Mattia Astorino).
+.PP
+The theme in use is
+.BR SSHH_THEME ,
+or else
+.B theme = \(dq\fIname\fB\(dq
+in
+.IR ~/.config/sshh/config.toml ,
+which
+.B T
+in the TUI writes.
+User themes are TOML files in
+.IR ~/.config/sshh/themes/name.toml ,
+and replace a built-in with the same name:
+.B background
+and
+.B foreground
+(\(dq#rrggbb\(dq),
+.B palette
+(the 16 ANSI colors) and an optional
+.B [ui]
+table with
+.BR accent ", " match ", " tag ", " connected " and " danger .
+Without
+.B COLORTERM=truecolor
+(or
+.BR 24bit )
+the nearest of the 256 colors is used.
+A theme that can't be loaded falls back to
+.BR terminal .
 .SH ENVIRONMENT
 .TP
 .B SSHH_DEBUG
@@ -628,6 +690,19 @@ found in
 .B SSHH_INCLUDE_FILE
 Path of the generated ssh_config file.
 .TP
+.B SSHH_THEME
+Theme to use, over the one in the config file.
+.TP
+.B COLORTERM
+.B truecolor
+or
+.B 24bit
+when the terminal shows RGB colors; otherwise themes use the 256 colors.
+.TP
+.B XDG_CONFIG_HOME
+Base of the config directory (default
+.IR ~/.config ).
+.TP
 .BR VISUAL ", " EDITOR
 Editor used by
 .B Ctrl\-e
@@ -643,6 +718,14 @@ if set; the same path on macOS).
 .I ~/.ssh/config.d/sshh.conf
 Generated ssh_config file, only when enabled with
 .BR "sshh ssh\-config sync" .
+.TP
+.I ~/.config/sshh/config.toml
+Settings: the theme
+.RI ( $XDG_CONFIG_HOME/sshh/config.toml
+if set; the same path on macOS).
+.TP
+.I ~/.config/sshh/themes/
+User themes.
 .SH EXIT STATUS
 In wrapper mode the exit status is the one of
 .BR ssh .
