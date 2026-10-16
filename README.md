@@ -720,6 +720,7 @@ tmux capture-pane -p -t t
 2. Bump the version and commit it:
 
    ```sh
+   make version             # shows the current version, the latest tag and the next ones
    make version v0.2.0      # or: make version patch | minor | major
    ```
 

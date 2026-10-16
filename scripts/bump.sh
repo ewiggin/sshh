@@ -3,6 +3,7 @@
 #
 #   make version v0.2.0              # or scripts/bump.sh v0.2.0
 #   make version patch|minor|major
+#   make version                     # show the current version and the next ones
 #
 # Updates Cargo.toml, Cargo.lock, the man page (version and date) and
 # CHANGES.md (`## Unreleased` becomes `## X.Y.Z — date`; it must exist and
@@ -28,7 +29,7 @@ rewrite() {
     rm -f "$file.tmp"
 }
 
-[ $# -eq 1 ] || die "usage: $0 <X.Y.Z | patch | minor | major>"
+[ $# -le 1 ] || die "usage: make version [vX.Y.Z | patch | minor | major]"
 
 current=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 echo "$current" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "can't read the version in Cargo.toml"
@@ -37,6 +38,20 @@ major=${current%%.*}
 rest=${current#*.}
 minor=${rest%%.*}
 patch=${rest#*.}
+
+# Without arguments: show the current version and what each bump gives.
+if [ $# -eq 0 ]; then
+    tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo none)
+    cat <<EOF
+Current version: $current (Cargo.toml; latest tag: $tag)
+
+Usage: make version <vX.Y.Z | patch | minor | major>
+    patch  -> $major.$minor.$((patch + 1))
+    minor  -> $major.$((minor + 1)).0
+    major  -> $((major + 1)).0.0
+EOF
+    exit 0
+fi
 
 case "$1" in
     patch) new="$major.$minor.$((patch + 1))" ;;

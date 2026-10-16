@@ -86,8 +86,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - `cargo test`, `cargo clippy --all-targets`, `make lint-man`.
 - Docs to keep in sync when changing subcommands, options or shortcuts: `README.md`, the TUI help
   (`ui::draw_help`, footer hints) and the man page `man/sshh.1` (roff, written by hand).
-  User-visible changes also go under `## Unreleased` in `CHANGES.md` (renamed to the version
-  by `make version`).
+- Workflow for every change: 1) make the change (code + tests + docs above), 2) commit it,
+  3) add its release note under `## Unreleased` in `CHANGES.md` (create the section if the last
+  release removed it; user-visible changes only) and commit that too.
 - Static build: `make static` / `make install-static` / `make dist` (musl target
   `x86_64-unknown-linux-musl`, needs `musl-gcc` for bundled SQLite; tests also pass with
   `cargo test --target x86_64-unknown-linux-musl`). Release profile has `strip = true`.
@@ -99,10 +100,11 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `vX.Y.Z` (must match Cargo.toml), builds `make dist` for x86_64 and aarch64 musl and
   aarch64-apple-darwin (`MACOSX_DEPLOYMENT_TARGET` 11.0) and publishes `sshh-<target>.tar.gz` + `.sha256`
   (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
-- Versions: `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh, GNU and BSD
+- Versions: `make version` alone shows the current version, the latest tag and the next ones;
+  `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh, GNU and BSD
   tools: no `sed -i`, use its `rewrite`) updates Cargo.toml, Cargo.lock, the man page `.TH` line and
   CHANGES.md (`## Unreleased` → `## X.Y.Z — date`; fails if it's missing or empty) and commits
-  "bump to vX.Y.Z"; then tag + push. Add a new `## Unreleased` with the next user-visible change.
+  "bump to vX.Y.Z"; then tag + push.
 - crates.io: the package is `sshh-tui` (`sshh` is taken) with `[[bin]] name = "sshh"`;
   `[package.metadata.binstall]` points to the release tarballs (keep it in sync with their names).
   `cargo publish` after pushing the release tag; `exclude` keeps CI/scripts out of the crate.
@@ -121,12 +123,3 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   (note: the real `ssh` reads the home from /etc/passwd, not `$HOME`; use `ssh -F <config>`).
 - Language: English for UI messages, comments, docs and tests. Quote values with single quotes
   (`'web'`) in messages.
-
-## Roadmap
-1. ✅ Base: DB, migrations, ssh parser, exec.
-2. ✅ TUI: list, details, fuzzy search, tag filter, mouse.
-3. ✅ Wizard for new connections, CRUD in the TUI, tags, copy command.
-4. ✅ History, JSON import/export, `~/.ssh/config` import.
-5. ✅ Generated ssh_config file; quick actions (sftp, ssh-copy-id).
-6. ✅ Embedded ssh sessions (several at once) next to the list.
-7. ✅ Terminal columns side by side.

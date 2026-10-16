@@ -8,6 +8,7 @@
 #   make dist MUSL_TARGET=aarch64-unknown-linux-musl # (on an aarch64 machine)
 #   make dist                                        # on macOS: aarch64-apple-darwin
 #   make version v0.2.0 (or patch|minor|major)       # bump the version and commit
+#   make version                                     # show the current version
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
@@ -98,8 +99,7 @@ $(eval $(VERSION_ARG):;@:)
 endif
 endif
 
-version: ## Bump the version and commit: make version <vX.Y.Z | patch | minor | major>
-	@test -n "$(VERSION_ARG)" || { echo "usage: make version <vX.Y.Z | patch | minor | major>" >&2; exit 1; }
+version: ## Bump the version and commit: make version <vX.Y.Z | patch | minor | major>; alone, show it
 	@scripts/bump.sh $(VERSION_ARG)
 
 # Preview the man page without installing it.
