@@ -19,6 +19,52 @@ use crate::db::{HistoryEntry, Layout};
 use crate::model::{Host, HostData};
 use crate::theme::Theme;
 
+/// Lines of the help (`?`): key and description; empty ones separate groups.
+pub const HELP: &[(&str, &str)] = &[
+    ("Space", "show the connection in the active pane"),
+    ("Alt-v", "show it in a new column, right of the active one"),
+    ("Alt--", "show it in a new pane below the last column"),
+    ("Alt-h/j/k/l", "focus left / down / up / right (also Alt-arrows)"),
+    ("Alt-1 … Alt-9", "jump to column N"),
+    ("Alt-J", "stack the pane below the column on its right (or left)"),
+    ("Alt-K", "take the pane out into its own column"),
+    ("Alt-H / Alt-L", "move the column left / right"),
+    ("Alt-n / Alt-p", "next / previous session in the pane"),
+    ("Alt-w", "close the pane (the session keeps running)"),
+    ("Alt-f / Alt-z", "full screen for the active pane (toggle)"),
+    ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
+    ("Alt-a", "broadcast: type in every visible pane (toggle)"),
+    ("x", "close the connection's sessions (ssh and sftp)"),
+    ("f", "full-screen ssh (back to sshh on exit)"),
+    ("", ""),
+    ("j/k ↑/↓", "move"),
+    ("gg / G", "go to top / bottom"),
+    ("Ctrl-d/u", "half page down / up"),
+    ("Ctrl-f/b", "page down / up"),
+    ("Tab / S-Tab", "next / previous pane (list, details, terminal)"),
+    ("/", "search (filters while typing; #tag by tag)"),
+    ("[ / ]", "tabs: connections / tags / layouts"),
+    ("Space (on a tag)", "filter the connections by it"),
+    ("Alt-v (on a tag)", "open all its connections in panes"),
+    ("Layouts tab", "a saves the panes, Space opens, r renames, dd deletes"),
+    ("Esc", "back / clear search"),
+    ("? then /", "search this help: n/N next/prev match, Esc clears"),
+    ("", ""),
+    ("a", "add connection"),
+    ("Enter / e, t", "edit / edit tags"),
+    ("dd", "delete (asks for confirmation)"),
+    ("yy", "copy the ssh command"),
+    ("s", "sftp in a new column, next to the ssh one"),
+    ("c", "install your public key (ssh-copy-id)"),
+    ("o", "change sort (recent / most used / alphabetical)"),
+    ("R", "reload"),
+    ("T", "theme (shown while moving, Enter saves)"),
+    ("q / Ctrl-c", "quit"),
+    ("", ""),
+    ("Click", "select · double click connects"),
+    ("Wheel", "move · scroll details or session history"),
+];
+
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Narrowest terminal column allowed when splitting.
 pub const MIN_COLUMN_WIDTH: u16 = 40;
@@ -165,7 +211,7 @@ pub struct Status {
 pub enum Mode {
     Normal,
     Search,
-    Help,
+    Help(HelpState),
     Form(Box<Form>),
     ConfirmDelete { alias: String },
     /// Typing the name to save the panes under, or the new name of the
@@ -175,6 +221,105 @@ pub enum Mode {
     ConfirmClose { id: i64, alias: String },
     ConfirmQuit { sessions: usize },
     Themes(ThemePicker),
+}
+
+/// The help: its scroll and its search (`/`, less style: every line stays,
+/// the matches are highlighted and `n`/`N` go through them).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HelpState {
+    /// First visible line.
+    pub scroll: usize,
+    /// Visible lines (set by the render).
+    pub height: usize,
+    pub query: String,
+    /// The search prompt is open.
+    pub typing: bool,
+    /// Matching lines in order, with the matched chars of the key and of the
+    /// description.
+    pub matches: Vec<(usize, Vec<usize>, Vec<usize>)>,
+    /// Index in `matches` of the current one.
+    pub current: Option<usize>,
+    /// `g` pressed (for `gg`).
+    pending_g: bool,
+}
+
+impl HelpState {
+    pub fn current_line(&self) -> Option<usize> {
+        self.current.map(|c| self.matches[c].0)
+    }
+
+    /// Matched chars of line `line`: (key, description).
+    pub fn highlights(&self, line: usize) -> (&[usize], &[usize]) {
+        match self.matches.iter().find(|(l, ..)| *l == line) {
+            Some((_, key, desc)) => (key, desc),
+            None => (&[], &[]),
+        }
+    }
+
+    fn max_scroll(&self) -> usize {
+        HELP.len().saturating_sub(self.height.max(1))
+    }
+
+    pub fn clamp_scroll(&mut self) {
+        self.scroll = self.scroll.min(self.max_scroll());
+    }
+
+    fn scroll_by(&mut self, delta: isize) {
+        self.scroll = self.scroll.saturating_add_signed(delta).min(self.max_scroll());
+    }
+
+    /// Fuzzy search, like the connection list, over each line's key and
+    /// description; the current match is the first one from the top of the view.
+    fn search(&mut self, matcher: &mut Matcher) {
+        self.matches.clear();
+        self.current = None;
+        if self.query.trim().is_empty() {
+            return;
+        }
+        let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
+        let mut buf = Vec::new();
+        let mut indices = Vec::new();
+        for (line, (key, desc)) in HELP.iter().enumerate() {
+            if key.is_empty() && desc.is_empty() {
+                continue;
+            }
+            let haystack = format!("{key} {desc}");
+            indices.clear();
+            if pattern.indices(Utf32Str::new(&haystack, &mut buf), matcher, &mut indices).is_none() {
+                continue;
+            }
+            indices.sort_unstable();
+            indices.dedup();
+            let key_len = key.chars().count();
+            let positions = indices.iter().map(|&i| i as usize);
+            let key_hl = positions.clone().filter(|&i| i < key_len).collect();
+            let desc_hl = positions.filter(|&i| i > key_len).map(|i| i - key_len - 1).collect();
+            self.matches.push((line, key_hl, desc_hl));
+        }
+        let from = self.scroll;
+        self.current = self.matches.iter().position(|(l, ..)| *l >= from).or((!self.matches.is_empty()).then_some(0));
+        self.show_current();
+    }
+
+    /// `n` / `N`: next / previous match, wrapping around.
+    fn next_match(&mut self, forward: bool) {
+        let n = self.matches.len();
+        if let Some(c) = self.current.filter(|_| n > 0) {
+            self.current = Some(if forward { (c + 1) % n } else { (c + n - 1) % n });
+            self.show_current();
+        }
+    }
+
+    /// Scrolls so the current match is visible.
+    fn show_current(&mut self) {
+        let Some(line) = self.current_line() else { return };
+        let height = self.height.max(1);
+        if line < self.scroll {
+            self.scroll = line;
+        } else if line >= self.scroll + height {
+            self.scroll = line + 1 - height;
+        }
+    }
 }
 
 /// Theme picker (`T`): the highlighted theme is shown while moving; Esc goes
@@ -1301,7 +1446,8 @@ impl App {
         }
         match &mut self.mode {
             Mode::Form(form) => match form.on_key(key) {
-                FormEvent::None => {}
+                // Only the wizard ignores destinations, and it isn't in the TUI.
+                FormEvent::None | FormEvent::Ignore => {}
                 FormEvent::Cancel => self.mode = Mode::Normal,
                 FormEvent::Editor => self.request = Some(Request::Editor),
                 FormEvent::Submit => {
@@ -1390,9 +1536,61 @@ impl App {
                 self.mode = Mode::Normal;
             }
             _ if ctrl && key.code == KeyCode::Char('c') => self.quit(),
-            Mode::Help => self.mode = Mode::Normal,
+            Mode::Help(_) => self.on_help_key(key, ctrl),
             Mode::Search => self.on_search_key(key, ctrl),
             Mode::Normal => self.on_normal_key(key, ctrl),
+        }
+    }
+
+    /// Keys in the help: scroll, search (`/`, `n`/`N`) and close.
+    fn on_help_key(&mut self, key: KeyEvent, ctrl: bool) {
+        let Mode::Help(help) = &mut self.mode else { return };
+        if help.typing {
+            match key.code {
+                KeyCode::Esc => {
+                    help.typing = false;
+                    help.query.clear();
+                    help.search(&mut self.matcher);
+                }
+                KeyCode::Enter => help.typing = false,
+                KeyCode::Backspace => {
+                    help.query.pop();
+                    help.search(&mut self.matcher);
+                }
+                KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => {
+                    help.query.push(c);
+                    help.search(&mut self.matcher);
+                }
+                _ => {}
+            }
+            return;
+        }
+        let pending_g = std::mem::take(&mut help.pending_g);
+        let half = (help.height / 2).max(1) as isize;
+        match key.code {
+            KeyCode::Esc if !help.query.is_empty() => {
+                help.query.clear();
+                help.search(&mut self.matcher);
+            }
+            KeyCode::Esc | KeyCode::Char('q' | '?') => self.mode = Mode::Normal,
+            KeyCode::Char('/') => {
+                help.typing = true;
+                help.query.clear();
+                help.search(&mut self.matcher);
+            }
+            KeyCode::Char('n') if !ctrl => help.next_match(true),
+            KeyCode::Char('N') => help.next_match(false),
+            KeyCode::Char('d') if ctrl => help.scroll_by(half),
+            KeyCode::Char('u') if ctrl => help.scroll_by(-half),
+            KeyCode::Char('j') | KeyCode::Down => help.scroll_by(1),
+            KeyCode::Char('k') | KeyCode::Up => help.scroll_by(-1),
+            KeyCode::PageDown => help.scroll_by(help.height as isize),
+            KeyCode::PageUp => help.scroll_by(-(help.height as isize)),
+            KeyCode::Char('G') | KeyCode::End => help.scroll = help.max_scroll(),
+            KeyCode::Home => help.scroll = 0,
+            KeyCode::Char('g') if pending_g => help.scroll = 0,
+            KeyCode::Char('g') => help.pending_g = true,
+            _ => {}
         }
     }
 
@@ -1422,7 +1620,7 @@ impl App {
                 self.tab = ListTab::Connections;
                 self.mode = Mode::Search;
             }
-            KeyCode::Char('?') => self.mode = Mode::Help,
+            KeyCode::Char('?') => self.mode = Mode::Help(HelpState::default()),
             KeyCode::Tab => self.cycle_focus(true),
             KeyCode::BackTab => self.cycle_focus(false),
             KeyCode::Char('d') if ctrl => self.move_by(self.page() / 2),
@@ -1593,8 +1791,10 @@ impl App {
             (Mode::Form(form), MouseEventKind::Down(MouseButton::Left)) => form.on_click(pos),
             (Mode::Form(_) | Mode::ConfirmDelete { .. } | Mode::ConfirmClose { .. }, _) => {}
             (Mode::ConfirmQuit { .. }, _) => {}
-            (Mode::Help, MouseEventKind::Down(_)) => self.mode = Mode::Normal,
-            (Mode::Help, _) => {}
+            (Mode::Help(_), MouseEventKind::Down(_)) => self.mode = Mode::Normal,
+            (Mode::Help(help), MouseEventKind::ScrollDown) => help.scroll_by(3),
+            (Mode::Help(help), MouseEventKind::ScrollUp) => help.scroll_by(-3),
+            (Mode::Help(_), _) => {}
             (_, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) if let Some(id) = column_key => {
                 let delta = if mouse.kind == MouseEventKind::ScrollUp { 3 } else { -3 };
                 self.request = Some(Request::Scroll(id, delta));
@@ -2817,5 +3017,118 @@ mod tests {
         app.on_key(ctrl('c'));
         assert_eq!(app.theme.name, "terminal");
         assert_eq!(app.outcome, None);
+    }
+
+    fn help(app: &App) -> &HelpState {
+        match &app.mode {
+            Mode::Help(help) => help,
+            _ => panic!("the help is not open"),
+        }
+    }
+
+    /// Opens the help as if it were drawn `height` lines high.
+    fn open_help(app: &mut App, height: usize) {
+        app.on_key(ch('?'));
+        if let Mode::Help(help) = &mut app.mode {
+            help.height = height;
+        }
+    }
+
+    fn type_keys(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.on_key(ch(c));
+        }
+    }
+
+    #[test]
+    fn help_search_highlights_and_jumps() {
+        let mut app = app();
+        open_help(&mut app, 10);
+        type_keys(&mut app, "/broadcast");
+        let h = help(&app);
+        assert!(h.typing);
+        assert!(!h.matches.is_empty());
+        let first = h.current_line().unwrap();
+        assert!(HELP[first].1.contains("broadcast"), "{:?}", HELP[first]);
+        // The matched chars of the description are highlighted.
+        let (_, desc) = h.highlights(first);
+        assert_eq!(desc.len(), "broadcast".len());
+        app.on_key(key(KeyCode::Enter));
+        assert!(!help(&app).typing);
+        // `n` wraps around, `N` goes back.
+        let count = help(&app).matches.len();
+        for _ in 0..count {
+            app.on_key(ch('n'));
+        }
+        assert_eq!(help(&app).current_line(), Some(first));
+        app.on_key(ch('N'));
+        assert_eq!(help(&app).current, Some(count - 1));
+    }
+
+    #[test]
+    fn help_search_scrolls_to_the_current_match() {
+        let mut app = app();
+        open_help(&mut app, 5);
+        type_keys(&mut app, "/wheel");
+        app.on_key(key(KeyCode::Enter));
+        let h = help(&app);
+        let line = h.current_line().unwrap();
+        assert!(line >= 5, "the match should be below the first page");
+        assert!((h.scroll..h.scroll + 5).contains(&line));
+        assert!(h.scroll <= HELP.len() - 5);
+    }
+
+    #[test]
+    fn help_search_without_matches() {
+        let mut app = app();
+        open_help(&mut app, 10);
+        type_keys(&mut app, "/zzzzqqq");
+        let h = help(&app);
+        assert!(h.matches.is_empty());
+        assert_eq!(h.current, None);
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(ch('n'));
+        assert_eq!(help(&app).current, None);
+    }
+
+    #[test]
+    fn help_scrolls_and_esc_clears_then_closes() {
+        let mut app = app();
+        open_help(&mut app, 10);
+        app.on_key(ch('j'));
+        app.on_key(ch('j'));
+        assert_eq!(help(&app).scroll, 2);
+        app.on_key(ch('k'));
+        assert_eq!(help(&app).scroll, 1);
+        app.on_key(ch('G'));
+        assert_eq!(help(&app).scroll, HELP.len() - 10);
+        app.on_key(ch('j'));
+        assert_eq!(help(&app).scroll, HELP.len() - 10);
+        app.on_key(ch('g'));
+        app.on_key(ch('g'));
+        assert_eq!(help(&app).scroll, 0);
+        app.on_key(ctrl('d'));
+        assert_eq!(help(&app).scroll, 5);
+        // Other keys don't close it any more.
+        app.on_key(ch('x'));
+        assert!(matches!(app.mode, Mode::Help(_)));
+        // Esc in the prompt cancels the search; then it clears a kept one,
+        // then closes.
+        type_keys(&mut app, "/tag");
+        app.on_key(key(KeyCode::Esc));
+        assert!(help(&app).query.is_empty() && !help(&app).typing);
+        type_keys(&mut app, "/tag");
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(key(KeyCode::Esc));
+        assert!(help(&app).query.is_empty());
+        assert!(help(&app).matches.is_empty());
+        app.on_key(key(KeyCode::Esc));
+        assert!(matches!(app.mode, Mode::Normal));
+        // q and ? close it too.
+        for c in ['q', '?'] {
+            open_help(&mut app, 10);
+            app.on_key(ch(c));
+            assert!(matches!(app.mode, Mode::Normal));
+        }
     }
 }

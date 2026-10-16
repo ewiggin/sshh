@@ -2,7 +2,24 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.9.3 — 2026-10-17
+
+- `Ctrl-n` in the wizard connects without saving and never asks again for that destination (for
+  temporary IPs, CI machines…). `sshh ignore` lists them, `sshh ignore add <dest>` adds one and
+  `sshh ignore rm <dest>` asks again; saving the destination also takes it off the list
+  ([#3](https://github.com/ewiggin/sshh/issues/3)).
+
+## 0.9.2 — 2026-10-17
+
+- Releases are published to crates.io (`cargo install sshh-tui`) automatically, right after the
+  GitHub release ([#9](https://github.com/ewiggin/sshh/issues/9)).
+
+## 0.9.1 — 2026-10-17
+
+- The help (`?`) scrolls (`j`/`k`, `Ctrl-d`/`Ctrl-u`, `gg`/`G`, wheel) and `/` searches it: matches are
+  highlighted and `n`/`N` jump between them ([#12](https://github.com/ewiggin/sshh/issues/12)).
+
+## 0.9.0 — 2026-10-16
 
 - **Themes.** Besides the default `terminal` theme (the terminal's own colors), sshh ships
   `gruvbox`, `everforest`, `kanagawa`, `monokai` and `material` themes, which also recolor what runs
