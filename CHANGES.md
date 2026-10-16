@@ -2,6 +2,10 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
+## Unreleased
+
+- Fix the shellcheck warning (SC2016) in `scripts/bump.sh` that made CI fail.
+
 ## 0.8.0 — 2026-10-16
 
 - **macOS support.** Releases include a binary for Apple Silicon (`sshh-aarch64-apple-darwin`) and
