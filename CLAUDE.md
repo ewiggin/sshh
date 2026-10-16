@@ -87,7 +87,7 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Docs to keep in sync when changing subcommands, options or shortcuts: `README.md`, the TUI help
   (`ui::draw_help`, footer hints) and the man page `man/sshh.1` (roff, written by hand).
   User-visible changes also go under `## Unreleased` in `CHANGES.md` (renamed to the version
-  when releasing).
+  by `make version`).
 - Static build: `make static` / `make install-static` / `make dist` (musl target
   `x86_64-unknown-linux-musl`, needs `musl-gcc` for bundled SQLite; tests also pass with
   `cargo test --target x86_64-unknown-linux-musl`). Release profile has `strip = true`.
@@ -99,8 +99,10 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `vX.Y.Z` (must match Cargo.toml), builds `make dist` for x86_64 and aarch64 musl and
   aarch64-apple-darwin (`MACOSX_DEPLOYMENT_TARGET` 11.0) and publishes `sshh-<target>.tar.gz` + `.sha256`
   (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
-- Versions: `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh + GNU sed) updates
-  Cargo.toml, Cargo.lock and the man page `.TH` line and commits "bump to vX.Y.Z"; then tag + push.
+- Versions: `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh, GNU and BSD
+  tools: no `sed -i`, use its `rewrite`) updates Cargo.toml, Cargo.lock, the man page `.TH` line and
+  CHANGES.md (`## Unreleased` → `## X.Y.Z — date`; fails if it's missing or empty) and commits
+  "bump to vX.Y.Z"; then tag + push. Add a new `## Unreleased` with the next user-visible change.
 - crates.io: the package is `sshh-tui` (`sshh` is taken) with `[[bin]] name = "sshh"`;
   `[package.metadata.binstall]` points to the release tarballs (keep it in sync with their names).
   `cargo publish` after pushing the release tag; `exclude` keeps CI/scripts out of the crate.

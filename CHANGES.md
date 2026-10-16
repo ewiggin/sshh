@@ -13,6 +13,8 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
   shortcuts need.
 - The Makefile works with BSD tools; `make dist` builds the native binary on macOS.
 - CI runs the tests, clippy and `make dist` on macOS too.
+- `make version` also renames `## Unreleased` in `CHANGES.md` to the new version (and fails if that
+  section is missing or empty), and works on macOS.
 
 ## 0.7.0 — 2026-10-15
 

@@ -716,17 +716,17 @@ tmux capture-pane -p -t t
 
 ### Releasing
 
-1. In [CHANGES.md](CHANGES.md), rename `## Unreleased` to the new version and date (e.g.
-   `## 0.2.0 — 2026-10-07`) and commit it (`make version` refuses uncommitted changes).
+1. Make sure the `## Unreleased` section of [CHANGES.md](CHANGES.md) lists the changes.
 2. Bump the version and commit it:
 
    ```sh
    make version v0.2.0      # or: make version patch | minor | major
    ```
 
-   It updates `Cargo.toml`, `Cargo.lock` and the man page (version and date) and commits them as
-   `bump to v0.2.0`. It refuses to run with uncommitted changes, a version that isn't greater than
-   the current one, or an existing tag.
+   It updates `Cargo.toml`, `Cargo.lock`, the man page (version and date) and `CHANGES.md`
+   (`## Unreleased` becomes `## 0.2.0 — <date>`) and commits them as `bump to v0.2.0`. It refuses to
+   run with uncommitted changes, a version that isn't greater than the current one, an existing tag,
+   or a missing or empty `## Unreleased` section. It works with GNU and BSD tools (Linux and macOS).
 3. Tag and push (the command prints it): `git tag v0.2.0 && git push origin main v0.2.0`.
 
 The release workflow checks that the tag matches `Cargo.toml`, runs the tests and publishes static

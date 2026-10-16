@@ -4,8 +4,10 @@
 #   make version v0.2.0              # or scripts/bump.sh v0.2.0
 #   make version patch|minor|major
 #
-# Updates Cargo.toml, Cargo.lock and the man page (version and date). It
-# doesn't tag or push: it prints the commands to publish the release.
+# Updates Cargo.toml, Cargo.lock, the man page (version and date) and
+# CHANGES.md (`## Unreleased` becomes `## X.Y.Z — date`; it must exist and
+# list something). It doesn't tag or push: it prints the commands to publish
+# the release. POSIX sh with tools that work the same in GNU and BSD (macOS).
 
 set -eu
 
@@ -14,6 +16,16 @@ cd "$(dirname "$0")/.."
 die() {
     printf 'error: %s\n' "$*" >&2
     exit 1
+}
+
+# rewrite FILE CMD...: runs CMD with FILE as stdin and replaces FILE with its
+# output (`sed -i` differs between GNU and BSD). Keeps FILE's permissions.
+rewrite() {
+    file=$1
+    shift
+    "$@" <"$file" >"$file.tmp" || { rm -f "$file.tmp"; die "could not update $file"; }
+    cat "$file.tmp" >"$file"
+    rm -f "$file.tmp"
 }
 
 [ $# -eq 1 ] || die "usage: $0 <X.Y.Z | patch | minor | major>"
@@ -48,17 +60,27 @@ if git rev-parse -q --verify "refs/tags/v$new" >/dev/null; then
     die "tag v$new already exists"
 fi
 
+# CHANGES.md must have a `## Unreleased` section with something in it.
+grep -q '^## Unreleased$' CHANGES.md || die "CHANGES.md has no '## Unreleased' section"
+awk '/^## / { inside = ($0 == "## Unreleased"); next } inside && NF { found = 1 } END { exit !found }' CHANGES.md ||
+    die "the '## Unreleased' section of CHANGES.md is empty: list the changes first"
+
 echo "Bumping $current -> $new"
 
+today=$(date +%Y-%m-%d)
+
 # The [package] version is the first `version = ` line of Cargo.toml.
-sed -i "0,/^version = \"$current\"/s//version = \"$new\"/" Cargo.toml
+rewrite Cargo.toml awk -v cur="version = \"$current\"" -v new="version = \"$new\"" \
+    '!done && $0 == cur { print new; done = 1; next } { print }'
 cargo update --workspace --offline --quiet
-sed -i "1s/^\.TH SSHH 1 [^ ]* \"sshh [^\"]*\"/.TH SSHH 1 $(date +%Y-%m-%d) \"sshh $new\"/" man/sshh.1
+rewrite man/sshh.1 sed "1s/^\.TH SSHH 1 [^ ]* \"sshh [^\"]*\"/.TH SSHH 1 $today \"sshh $new\"/"
+rewrite CHANGES.md sed "s/^## Unreleased\$/## $new — $today/"
 
 grep -q "^version = \"$new\"" Cargo.toml || die "Cargo.toml was not updated"
 grep -q "\"sshh $new\"" man/sshh.1 || die "man/sshh.1 was not updated"
+grep -q "^## $new — $today\$" CHANGES.md || die "CHANGES.md was not updated"
 
-git add Cargo.toml Cargo.lock man/sshh.1
+git add Cargo.toml Cargo.lock man/sshh.1 CHANGES.md
 git commit --quiet -m "bump to v$new"
 git log --oneline -1
 
