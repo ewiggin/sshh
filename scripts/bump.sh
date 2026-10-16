@@ -85,6 +85,8 @@ echo "Bumping $current -> $new"
 today=$(date +%Y-%m-%d)
 
 # The [package] version is the first `version = ` line of Cargo.toml.
+# The awk program is single-quoted on purpose ($0 is awk's).
+# shellcheck disable=SC2016
 rewrite Cargo.toml awk -v cur="version = \"$current\"" -v new="version = \"$new\"" \
     '!done && $0 == cur { print new; done = 1; next } { print }'
 cargo update --workspace --offline --quiet
