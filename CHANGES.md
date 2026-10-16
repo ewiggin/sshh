@@ -2,6 +2,13 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
+## Unreleased
+
+- `Ctrl-n` in the wizard connects without saving and never asks again for that destination (for
+  temporary IPs, CI machines…). `sshh ignore` lists them, `sshh ignore add <dest>` adds one and
+  `sshh ignore rm <dest>` asks again; saving the destination also takes it off the list
+  ([#3](https://github.com/ewiggin/sshh/issues/3)).
+
 ## 0.9.0 — 2026-10-16
 
 - **Themes.** Besides the default `terminal` theme (the terminal's own colors), sshh ships
