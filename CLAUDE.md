@@ -86,6 +86,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - `cargo test`, `cargo clippy --all-targets`, `make lint-man`.
 - Docs to keep in sync when changing subcommands, options or shortcuts: `README.md`, the TUI help
   (`ui::draw_help`, footer hints) and the man page `man/sshh.1` (roff, written by hand).
+  User-visible changes also go under `## Unreleased` in `CHANGES.md` (renamed to the version
+  when releasing).
 - Static build: `make static` / `make install-static` / `make dist` (musl target
   `x86_64-unknown-linux-musl`, needs `musl-gcc` for bundled SQLite; tests also pass with
   `cargo test --target x86_64-unknown-linux-musl`). Release profile has `strip = true`.

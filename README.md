@@ -15,7 +15,7 @@ SSH connection manager for the terminal, written in Rust.
   `ssh-agent`, `ProxyJump`, `ControlMaster`, `known_hosts`, FIDO keys, etc. keep working.
 - **It doesn't store passwords** or any secrets: use your keys and your agent as usual.
 
-> Status: in development. See the [Roadmap](#roadmap).
+> Status: in development. See [CHANGES.md](CHANGES.md) for what changed in each version.
 
 ## Contents
 
@@ -34,7 +34,6 @@ SSH connection manager for the terminal, written in Rust.
 - [Data and storage](#data-and-storage)
 - [Environment variables](#environment-variables)
 - [Development](#development)
-- [Roadmap](#roadmap)
 - [License](#license)
 
 ## Installation
@@ -697,23 +696,11 @@ tmux capture-pane -p -t t
 | `src/tui/session.rs` | embedded sessions: ssh in a pseudo terminal + VT100 emulator, key encoding |
 | `src/tui/term.rs` | terminal, `$EDITOR`, external programs and clipboard |
 
-## Roadmap
-
-- [x] **Phase 1**: database, migrations, ssh argument parser and `exec`.
-- [x] **Phase 2**: TUI with list, details, fuzzy search, tag filter and mouse.
-- [x] **Phase 3**: new connection wizard, add/edit/delete in the TUI, tags and copy command.
-- [x] **Phase 4**: history, JSON export/import, `~/.ssh/config` import.
-- [x] **Phase 5**: generated ssh_config file for `Include` and quick actions (sftp, ssh-copy-id).
-- [x] **Phase 6**: embedded ssh sessions next to the list (lazygit style), several at once.
-- [x] **Phase 7**: terminal columns side by side (split, navigate, zoom, move, close).
-
-Pending ideas: "don't ask again" for a destination in the wizard, `sshh add` without arguments
-opening the form, configurable shortcuts, keeping sessions alive after quitting (a background
-server, like tmux), character-wise selection in history mode.
-
 ### Releasing
 
-1. Bump the version and commit it:
+1. In [CHANGES.md](CHANGES.md), rename `## Unreleased` to the new version and date (e.g.
+   `## 0.2.0 — 2026-10-07`) and commit it (`make version` refuses uncommitted changes).
+2. Bump the version and commit it:
 
    ```sh
    make version v0.2.0      # or: make version patch | minor | major
@@ -722,7 +709,7 @@ server, like tmux), character-wise selection in history mode.
    It updates `Cargo.toml`, `Cargo.lock` and the man page (version and date) and commits them as
    `bump to v0.2.0`. It refuses to run with uncommitted changes, a version that isn't greater than
    the current one, or an existing tag.
-2. Tag and push (the command prints it): `git tag v0.2.0 && git push origin main v0.2.0`.
+3. Tag and push (the command prints it): `git tag v0.2.0 && git push origin main v0.2.0`.
 
 The release workflow checks that the tag matches `Cargo.toml`, runs the tests and publishes static
 binaries for x86_64 and aarch64 Linux and a binary for macOS on Apple Silicon, with their SHA-256
