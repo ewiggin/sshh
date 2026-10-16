@@ -1,6 +1,6 @@
 # Push a tag matching the version in Cargo.toml (e.g. v0.1.0) to publish a
 # release with static binaries for x86_64 and aarch64 Linux and a binary for
-# macOS on Apple Silicon.
+# macOS on Apple Silicon, and then the crate (`sshh-tui`) on crates.io.
 name: Release
 
 on:
@@ -76,3 +76,25 @@ jobs:
           body_path: ${{ runner.temp }}/notes.md
           # Appended after the body: the "Full Changelog" compare link.
           generate_release_notes: true
+
+  # crates.io with Trusted Publishing: the job's OIDC token is exchanged for a
+  # short-lived crates.io token, so no API token is stored in the repository.
+  # Configured on crates.io (sshh-tui → Settings → Trusted Publishing) for
+  # ewiggin/sshh, workflow release.yml, environment crates-io. It runs after
+  # the GitHub Release, so a failure here never leaves a tag without binaries.
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish to crates.io
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
