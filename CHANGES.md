@@ -5,6 +5,8 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 ## Unreleased
 
 - The GitHub release notes are the version's section of this file.
+- The README explains how to run the macOS binary when the tarball was downloaded with a browser
+  (`xattr -d com.apple.quarantine sshh`).
 
 ## 0.8.1 — 2026-10-16
 
