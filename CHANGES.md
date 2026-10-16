@@ -2,7 +2,7 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.8.1 — 2026-10-16
 
 - Fix the shellcheck warning (SC2016) in `scripts/bump.sh` that made CI fail.
 
