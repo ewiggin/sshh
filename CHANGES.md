@@ -2,7 +2,7 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.8.0 — 2026-10-16
 
 - **macOS support.** Releases include a binary for Apple Silicon (`sshh-aarch64-apple-darwin`) and
   `install.sh` installs it (also from a shell under Rosetta). Intel Macs build from source.
