@@ -98,8 +98,10 @@ Status: LATER, NEXT, NOW, In Progress, Review, Done; Size: S/M/L/XL).
   --base main`), assign the issue (`gh issue edit <n> --add-assignee @me`), move the card to
   **In Progress** (`gh project item-edit 6 --owner ewiggin --url <issue url> --field Status --value
   "In Progress"`). Work and commit on that branch (change, then its `CHANGES.md` note), never on main.
-- Finish: push the branch, move the card to **Review** and tell the user; they open the PR (with
-  `Closes #<n>`) and review it.
+- Finish: push the branch, open the PR (`gh pr create --base main`) and move the card to
+  **Review**. PR body: short context (problem and approach), the changes as a list, a checklist of
+  what the user should check/try to verify it works (concrete commands and expected results), and
+  `Closes #<n>`. The user reviews, approves and merges.
 - Review feedback: apply the requested changes on the same branch and push.
 - The user merges the PR; only then move the card to **Done** (the issue closes via `Closes #<n>`).
 - Static build: `make static` / `make install-static` / `make dist` (musl target
