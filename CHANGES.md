@@ -9,6 +9,8 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 - The database is at `~/.local/share/sshh/sshh.db` on every platform, also on macOS (not
   `~/Library/Application Support`); `$XDG_DATA_HOME` is respected.
 - The clipboard uses `pbcopy` on macOS.
+- The README and man page explain how to make Option act as Alt on macOS terminals, which the pane
+  shortcuts need.
 - The Makefile works with BSD tools; `make dist` builds the native binary on macOS.
 - CI runs the tests, clippy and `make dist` on macOS too.
 

@@ -339,6 +339,24 @@ word) and `Alt-←`/`Alt-→` (word movement in zsh/fish) are taken by `sshh`; u
 in the shell instead. Other readline keys (`Alt-.`, `Alt-b`, `Alt-d`…) still reach the shell. When a session has ended,
 `Enter` or `Space` reconnects and `Esc` goes back to the list.
 
+#### macOS: Option as Alt
+
+On macOS the `Alt` shortcuts are the **Option (⌥)** key, but most terminals use Option to type
+special characters by default (`⌥-h` types `˙`), so `sshh` (and tmux, vim…) never see `Alt-h`. Turn
+it into Alt in your terminal; using only the left one keeps the right Option for characters like
+`@`, `#` or `€`:
+
+| Terminal | Setting |
+|---|---|
+| Terminal.app | Settings → Profiles → Keyboard → "Use Option as Meta key" |
+| iTerm2 | Settings → Profiles → Keys → Left Option key: **Esc+** |
+| Ghostty | `macos-option-as-alt = left` |
+| kitty | `macos_option_as_alt left` |
+| Alacritty | `[window] option_as_alt = "OnlyLeft"` |
+| WezTerm | `send_composed_key_when_left_alt_is_pressed = false` |
+
+In iTerm2 the native selection over a program that uses the mouse is Option-drag instead of `Shift`.
+
 ### History mode
 
 `Alt-s` freezes the active column's history and lets you move through it with the keyboard, like
