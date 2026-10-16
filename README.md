@@ -25,6 +25,7 @@ SSH connection manager for the terminal, written in Rust.
 - [New connection wizard](#new-connection-wizard)
 - [TUI](#tui)
 - [Connection form](#connection-form)
+- [Themes](#themes)
 - [Persistent sessions (tmux)](#persistent-sessions-tmux)
 - [Subcommands](#subcommands)
 - [Importing `~/.ssh/config`](#importing-sshconfig)
@@ -244,9 +245,10 @@ a normal terminal (passwords, host key prompts, agent, full-screen programs like
 
 Quitting `sshh` closes the sessions (it asks first).
 
-The UI only uses your terminal's 16-color palette and its default foreground and background, so it
-follows your terminal theme (for example, Omarchy themes): borders and shortcuts use the theme's
-blue, its primary accent.
+By default the UI only uses your terminal's 16-color palette and its default foreground and
+background, so it follows your terminal theme (for example, Omarchy themes): borders and shortcuts
+use the theme's blue, its primary accent. If your terminal's colors don't look good (the macOS
+Terminal defaults, for instance), pick one of sshh's [themes](#themes) with `T`.
 
 The list can be sorted by recent use, by number of uses or by alias. If the output isn't a terminal
 (`sshh | less`), it prints the list as text.
@@ -316,7 +318,8 @@ List and general keys:
 | `c` | install your public key on the server (`ssh-copy-id`) |
 | `o` | change sort order: recent → most used → alphabetical |
 | `R` | reload the list |
-| `?` | help |
+| `T` | choose the [theme](#themes): moving shows it, `Enter` saves it, `Esc` goes back to the one you had |
+| `?` | help: `j`/`k`, `Ctrl-d`/`Ctrl-u`, `gg`/`G` or the wheel scroll it; `/` searches it (fuzzy, matches highlighted), `n`/`N` go to the next/previous match; `Esc` clears the search, then closes it (also `q` or `?`) |
 | `Esc` | go back one level / clear the search (never quits) |
 | `q`, `Ctrl-c` | quit (asks first if there are open sessions) |
 
@@ -431,6 +434,63 @@ The same form is used to add (`a`), edit (`e`, `t`) and in the wizard.
 If a value is invalid (wrong port, duplicate alias…), focus jumps to that field and the error is shown
 in red.
 
+## Themes
+
+The default theme, `terminal`, leaves the colors to your terminal. Any other theme sets the
+background, the foreground and the 16 ANSI colors of the whole screen: sshh's own UI **and** what
+runs in the panes (`ls`, `htop`, `vim`…), so they look right wherever your terminal palette doesn't.
+Programs that use 256 colors or truecolor keep their own.
+
+Choose it with `T` in the TUI (it's saved in the config file), with `theme = "<name>"` in
+`~/.config/sshh/config.toml` (`$XDG_CONFIG_HOME/sshh/config.toml`; the same path on macOS), or with
+`SSHH_THEME=<name>`, which wins over the file:
+
+```sh
+sshh themes                    # list them; * marks the one in use
+sshh themes show gruvbox-dark  # print a theme file
+```
+
+Built-in themes, with palettes from these projects:
+
+| Theme | Palette by |
+|---|---|
+| `gruvbox-dark`, `gruvbox-light` | Pavel Pertsev, [Gruvbox](https://github.com/morhetz/gruvbox) (MIT) |
+| `everforest-dark`, `everforest-light` | sainnhe, [Everforest](https://github.com/sainnhe/everforest) (MIT) |
+| `kanagawa-wave`, `kanagawa-dragon`, `kanagawa-lotus` | Tommaso Laurenzi, [Kanagawa](https://github.com/rebelot/kanagawa.nvim) (MIT), after Hokusai's *The Great Wave off Kanagawa* |
+| `monokai` | Wimer Hazenberg, [Monokai](https://monokai.pro) |
+| `material`, `material-palenight` | Mattia Astorino, [Material Theme](https://github.com/material-theme), after Google's Material Design colors |
+
+Your own themes go in `~/.config/sshh/themes/<name>.toml`; one with a built-in's name replaces it.
+Start from a built-in one:
+
+```sh
+mkdir -p ~/.config/sshh/themes
+sshh themes show gruvbox-dark > ~/.config/sshh/themes/mine.toml
+```
+
+```toml
+background = "#282828"
+foreground = "#ebdbb2"
+# black, red, green, yellow, blue, magenta, cyan, white, then the bright ones
+palette = [
+  "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+  "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
+]
+
+# Optional: sshh's own colors (by default, their ANSI color of the palette).
+[ui]
+accent = "#83a598"     # blue: borders, shortcuts
+match = "#fabd2f"      # yellow: search matches
+tag = "#d3869b"        # magenta: tags
+connected = "#b8bb26"  # green: live sessions
+danger = "#fb4934"     # red: broadcast, confirmations, errors
+```
+
+Truecolor terminals (those that set `COLORTERM=truecolor` or `24bit`, like iTerm2, Ghostty, kitty
+or Alacritty) show the exact colors; in the others (like the macOS Terminal) sshh uses the nearest
+of the 256 colors. A theme that can't be loaded never stops sshh: it shows the error and uses the
+terminal's colors.
+
 ## Persistent sessions (tmux)
 
 Sessions live inside `sshh`: closing it (or losing the network) ends them. To keep the shell alive,
@@ -467,6 +527,7 @@ sshh export [-o file]                        # export to JSON
 sshh import <file|->                         # import from JSON
 sshh import-ssh-config [file]                # import the Host blocks of ~/.ssh/config
 sshh ssh-config [status|sync|print|disable]  # generated ssh_config file (see below)
+sshh themes [list|show <name>]               # color themes (see Themes)
 sshh --help                                  # help (also `sshh <subcommand> --help`)
 ```
 
@@ -661,6 +722,8 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
 - The schema migrates itself on startup.
+- Settings (only the [theme](#themes) for now) in `~/.config/sshh/config.toml`
+  (`$XDG_CONFIG_HOME/sshh/config.toml`) and your themes in `~/.config/sshh/themes/`.
 - Optionally, `~/.ssh/config.d/sshh.conf` (see [Integration](#integration-with-ssh-scp-rsync-git)),
   generated from the database: SQLite remains the source of truth.
 
@@ -673,6 +736,8 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
 | `SSHH_DB=<path>` | use another database (useful for testing) |
 | `SSHH_SSH=<path>` | use another binary instead of `ssh` |
 | `SSHH_INCLUDE_FILE=<path>` | another path for the generated ssh_config file (useful for testing) |
+| `SSHH_THEME=<name>` | [theme](#themes) to use, over the one in `config.toml` |
+| `COLORTERM=truecolor` | the terminal shows RGB colors; without it themes use the 256 colors |
 | `VISUAL` / `EDITOR` | editor for `Ctrl-e` in the form |
 
 The clipboard (`yy`) uses `pbcopy` on macOS, `wl-copy` (Wayland) or `xclip` (X11) when available and otherwise the
@@ -713,7 +778,8 @@ tmux capture-pane -p -t t
 | `src/model.rs` | data model and validation |
 | `src/ssh_config.rs` | reads ssh_config files (with `Include`) to import them |
 | `src/include.rs` | generated ssh_config file (`~/.ssh/config.d/sshh.conf`) |
-| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`) |
+| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`, `themes`) |
+| `src/theme.rs` | color themes: loading, config file and palette applied after drawing (`themes/` = built-in ones) |
 | `src/tui/app.rs` | TUI state and event handling (no terminal; testable) |
 | `src/tui/form.rs` | add/edit form and wizard |
 | `src/tui/ui.rs` | rendering |

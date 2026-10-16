@@ -1,0 +1,10 @@
+# Material for sshh.
+# Based on the Material Theme by Mattia Astorino (equinusocio):
+# https://github.com/material-theme, after Google's Material Design colors.
+
+background = "#263238"
+foreground = "#eeffff"
+palette = [
+  "#37474f", "#f07178", "#c3e88d", "#ffcb6b", "#82aaff", "#c792ea", "#89ddff", "#eeffff",
+  "#546e7a", "#ff5370", "#c3e88d", "#ffcb6b", "#82aaff", "#c792ea", "#89ddff", "#ffffff",
+]

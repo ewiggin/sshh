@@ -1,0 +1,10 @@
+# Material (Palenight) for sshh.
+# Based on the Material Theme by Mattia Astorino (equinusocio):
+# https://github.com/material-theme, after Google's Material Design colors.
+
+background = "#292d3e"
+foreground = "#a6accd"
+palette = [
+  "#32374d", "#f07178", "#c3e88d", "#ffcb6b", "#82aaff", "#c792ea", "#89ddff", "#a6accd",
+  "#676e95", "#ff5370", "#c3e88d", "#ffcb6b", "#82aaff", "#c792ea", "#89ddff", "#ffffff",
+]

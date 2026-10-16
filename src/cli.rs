@@ -14,7 +14,7 @@ use crate::db::{self, Db, ImportReport, OnConflict};
 use crate::include::{self, INCLUDE_LINE, IncludeState};
 use crate::model::{HostData, RESERVED_ALIASES, SshOption};
 use crate::ssh_args::{Destination, parse_option};
-use crate::{ssh_config, tui};
+use crate::{ssh_config, theme, tui};
 
 #[derive(Parser)]
 #[command(
@@ -72,6 +72,19 @@ enum Command {
         #[command(subcommand)]
         action: Option<SshConfigAction>,
     },
+    /// List the color themes, or print one to start your own
+    Themes {
+        #[command(subcommand)]
+        action: Option<ThemesAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ThemesAction {
+    /// List the themes and mark the one in use (default)
+    List,
+    /// Print a theme file (copy it to the themes folder to make your own)
+    Show { name: String },
 }
 
 #[derive(Subcommand)]
@@ -175,7 +188,57 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::Import { file, opts } => import(file, opts),
         Command::ImportSshConfig { file, tags, opts } => import_ssh_config(file, tags, opts),
         Command::SshConfig { action } => ssh_config_cmd(action.unwrap_or(SshConfigAction::Status)),
+        Command::Themes { action } => themes_cmd(action.unwrap_or(ThemesAction::List)),
     }
+}
+
+fn themes_cmd(action: ThemesAction) -> Result<()> {
+    let themes = theme::list()?;
+    match action {
+        ThemesAction::Show { name } => {
+            let Some((_, source)) = themes.iter().find(|(n, _)| *n == name) else {
+                bail!("no theme named '{name}'");
+            };
+            print!("{}", source.read()?);
+        }
+        ThemesAction::List => {
+            let (current, from) = theme::configured()?;
+            let mut usable = false;
+            for (name, source) in &themes {
+                let mark = if *name == current { "*" } else { " " };
+                let origin = match source {
+                    theme::Source::Terminal => "the terminal's colors (default)".to_string(),
+                    theme::Source::Builtin(_) => "built-in".to_string(),
+                    theme::Source::User { path, overrides } => {
+                        let replaces = if *overrides { ", replaces the built-in" } else { "" };
+                        format!("{}{replaces}", path.display())
+                    }
+                };
+                let origin = match theme::from_source(name, source, theme::Depth::TrueColor) {
+                    Ok(_) => {
+                        usable |= *name == current;
+                        origin
+                    }
+                    Err(e) => format!("{origin} — invalid: {}", e.root_cause()),
+                };
+                println!("{mark} {name:<20} {origin}");
+            }
+            if usable {
+                println!("\nIn use: '{current}' (from {from}).");
+            } else {
+                println!("\nThe theme '{current}' (from {from}) can't be used; sshh uses the terminal's colors.");
+            }
+            println!(
+                "Choose with `theme = \"<name>\"` in {}, $SSHH_THEME or `T` in the TUI.",
+                theme::config_file()?.display()
+            );
+            println!(
+                "Your themes go in {}/<name>.toml (`sshh themes show <name>` prints one to start from).",
+                theme::themes_dir()?.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 fn ssh_config_cmd(action: SshConfigAction) -> Result<()> {
