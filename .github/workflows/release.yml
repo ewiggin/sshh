@@ -74,3 +74,5 @@ jobs:
         with:
           files: dist/*
           body_path: ${{ runner.temp }}/notes.md
+          # Appended after the body: the "Full Changelog" compare link.
+          generate_release_notes: true
