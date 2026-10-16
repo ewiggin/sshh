@@ -36,6 +36,8 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME doesn't match version $version in Cargo.toml"
             exit 1
           fi
+      - name: Check that CHANGES.md has notes for the tag
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" >/dev/null
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -60,6 +62,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+      # The release body is the version's section of CHANGES.md.
+      - name: Release notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -67,4 +73,4 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/notes.md

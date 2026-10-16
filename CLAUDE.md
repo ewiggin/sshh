@@ -99,7 +99,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   install.sh, static build; macOS job (tests, clippy, `make dist`). Release (`release.yml`): on tag
   `vX.Y.Z` (must match Cargo.toml), builds `make dist` for x86_64 and aarch64 musl and
   aarch64-apple-darwin (`MACOSX_DEPLOYMENT_TARGET` 11.0) and publishes `sshh-<target>.tar.gz` + `.sha256`
-  (no version in the name, so `releases/latest/download/...` works). License: MIT OR Apache-2.0.
+  (no version in the name, so `releases/latest/download/...` works); the release body is the
+  version's section of CHANGES.md (`scripts/release-notes.sh vX.Y.Z`; the build fails without it). License: MIT OR Apache-2.0.
 - Versions: `make version` alone shows the current version, the latest tag and the next ones;
   `make version vX.Y.Z|patch|minor|major` (`scripts/bump.sh`, POSIX sh, GNU and BSD
   tools: no `sed -i`, use its `rewrite`) updates Cargo.toml, Cargo.lock, the man page `.TH` line and

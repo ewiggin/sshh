@@ -32,7 +32,8 @@ jobs:
         run: |
           sh -n install.sh
           sh -n scripts/bump.sh
-          shellcheck install.sh scripts/bump.sh
+          sh -n scripts/release-notes.sh
+          shellcheck install.sh scripts/bump.sh scripts/release-notes.sh
 
   static:
     runs-on: ubuntu-latest

@@ -730,9 +730,10 @@ tmux capture-pane -p -t t
    or a missing or empty `## Unreleased` section. It works with GNU and BSD tools (Linux and macOS).
 3. Tag and push (the command prints it): `git tag v0.2.0 && git push origin main v0.2.0`.
 
-The release workflow checks that the tag matches `Cargo.toml`, runs the tests and publishes static
-binaries for x86_64 and aarch64 Linux and a binary for macOS on Apple Silicon, with their SHA-256
-checksums.
+The release workflow checks that the tag matches `Cargo.toml` and that `CHANGES.md` has notes for
+it, runs the tests and publishes static binaries for x86_64 and aarch64 Linux and a binary for macOS
+on Apple Silicon, with their SHA-256 checksums. The release notes are that version's section of
+`CHANGES.md` (`scripts/release-notes.sh v0.2.0` prints them).
 
 ## License
 
