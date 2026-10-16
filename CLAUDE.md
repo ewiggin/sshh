@@ -137,7 +137,9 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 ## Task workflow
 Features and bugs are GitHub issues on the project board "sshh" (`gh project … 6 --owner ewiggin`;
 Status: LATER, NEXT, NOW, In Progress, Review, Done; Size: S/M/L/XL).
-- The user prioritizes and moves cards from NEXT to NOW. Only take tasks that are in **NOW**.
+- The user prioritizes and moves cards from NEXT to NOW. Only take tasks that are in **NOW**,
+  in the board's order within the column (top first; `gh project item-list 6 --owner ewiggin`
+  returns items in that order).
 - Open design decisions: don't guess. If a task leaves a decision that is the user's to make
   (behaviour, naming, data location, scope…), comment the question on the issue (options and a
   recommendation), add the `question` label and leave it; go on only after the user answers there
