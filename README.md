@@ -61,7 +61,9 @@ update.
 
 You can also download the tarball for your system from the releases page
 (`sshh-x86_64-unknown-linux-musl`, `sshh-aarch64-unknown-linux-musl`, `sshh-aarch64-apple-darwin`):
-it contains the binary, the man page and the licenses.
+it contains the binary, the man page and the licenses. On macOS, a tarball downloaded with a browser
+is quarantined and Gatekeeper blocks the binary (it isn't notarized); clear the flag after unpacking
+with `xattr -d com.apple.quarantine sshh`. `install.sh` and `curl` don't have this problem.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ewiggin/sshh/main/install.sh | SSHH_PREFIX=/usr/local sh
