@@ -1,7 +1,7 @@
 [package]
 # The crate name `sshh` is taken on crates.io; the binary is still `sshh`.
 name = "sshh-tui"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.88"
 description = "SSH connection manager with a TUI: use it like ssh, save connections with notes and tags, and keep several sessions open side by side"

@@ -2,7 +2,7 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.9.0 — 2026-10-16
 
 - **Themes.** Besides the default `terminal` theme (the terminal's own colors), sshh ships
   `gruvbox`, `everforest`, `kanagawa`, `monokai` and `material` themes, which also recolor what runs
