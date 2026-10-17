@@ -386,6 +386,27 @@ it into Alt in your terminal; using only the left one keeps the right Option for
 
 In iTerm2 the native selection over a program that uses the mouse is Option-drag instead of `Shift`.
 
+#### Custom shortcuts
+
+The pane shortcuts (the `Alt` keys above) can be changed in the `[keys]` table of
+`~/.config/sshh/config.toml`: `action = "key"` or a list of keys. Setting an action replaces its
+default keys; a key you give an action stops doing what it did by default. Keys need `ctrl-` or `alt-`
+(or are `f1`…`f12`), so they never take a key you type: `alt-h`, `ctrl-alt-left`, `alt-H` (=
+`alt-shift-h`), `alt--`. The help, the footer and the messages show the keys in use.
+
+```toml
+[keys]
+zoom = "ctrl-alt-z"                 # instead of Alt-f / Alt-z, which then reach readline
+focus-left = ["alt-h", "ctrl-left"]
+```
+
+Actions: `focus-left`, `focus-down`, `focus-up`, `focus-right`, `column-1` … `column-9`,
+`next-session`, `prev-session`, `new-column`, `new-pane-below`, `history`, `close-pane`, `zoom`,
+`broadcast`, `move-column-left`, `move-column-right`, `stack`, `unstack`. `sshh config` lists them with
+their keys (`*` marks the changed ones) and `sshh config init` writes a config file with all of them
+commented out. A wrong entry (unknown action, invalid key, two actions with the same key) shows a
+warning and keeps the default for that action.
+
 ### History mode
 
 `Alt-s` freezes the active column's history and lets you move through it with the keyboard, like
@@ -553,6 +574,7 @@ sshh import-ssh-config [file]                # import the Host blocks of ~/.ssh/
 sshh ssh-config [status|sync|print|disable]  # generated ssh_config file (see below)
 sshh themes [list|show <name>]               # color themes (see Themes)
 sshh ignore [list|add <dest>|rm <dest>]      # destinations the wizard never asks to save
+sshh config [show|path|init]                 # settings in use (theme, panes, shortcuts), config file
 sshh --help                                  # help (also `sshh <subcommand> --help`)
 ```
 
@@ -748,7 +770,7 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
 - The schema migrates itself on startup.
-- Settings (the [theme](#themes) and `restore_panes`) in `~/.config/sshh/config.toml`
+- Settings (the [theme](#themes), `restore_panes` and the [shortcuts](#custom-shortcuts)) in `~/.config/sshh/config.toml`
   (`$XDG_CONFIG_HOME/sshh/config.toml`) and your themes in `~/.config/sshh/themes/`.
 - Optionally, `~/.ssh/config.d/sshh.conf` (see [Integration](#integration-with-ssh-scp-rsync-git)),
   generated from the database: SQLite remains the source of truth.
@@ -804,7 +826,9 @@ tmux capture-pane -p -t t
 | `src/model.rs` | data model and validation |
 | `src/ssh_config.rs` | reads ssh_config files (with `Include`) to import them |
 | `src/include.rs` | generated ssh_config file (`~/.ssh/config.d/sshh.conf`) |
-| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`, `themes`, `ignore`) |
+| `src/cli.rs` | subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`, `ssh-config`, `themes`, `ignore`, `config`) |
+| `src/keys.rs` | pane shortcuts: actions, default keys and `[keys]` in config.toml |
+| `src/config.rs` | `~/.config/sshh/config.toml` |
 | `src/theme.rs` | color themes: loading, config file and palette applied after drawing (`themes/` = built-in ones) |
 | `src/tui/app.rs` | TUI state and event handling (no terminal; testable) |
 | `src/tui/form.rs` | add/edit form and wizard |

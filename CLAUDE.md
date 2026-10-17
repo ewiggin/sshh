@@ -73,7 +73,12 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   else the hidden `''` layout of the last panes if `config::Config::restore_panes`; saved on quit by
   `save_last_panes`) is shown after the first draw by `App::restore_layout`, without connecting.
 - `config`: `$XDG_CONFIG_HOME/sshh/config.toml` (`config::load`, `config::from_toml` = one-line
-  errors); unknown keys allowed, a broken file warns and uses the defaults.
+  errors); unknown keys allowed, a broken file warns and uses the defaults. `sshh config
+  [show|path|init]` (`keys::default_config_file`).
+- `keys`: pane shortcuts = `Action`s (kebab-case names) → `Key`s; `Keymap::default()` = the Alt keys,
+  `Keymap::from_config([keys])` never fails (warnings; a user key is taken from its default owner).
+  `App::on_alt_key` dispatches on `App::keymap.action(key)`; labels in the help/footer go through
+  `app::key_label` (the default text while unchanged).
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,
@@ -92,7 +97,7 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   `Mode::Themes`, preview while moving, `Request::SaveTheme`). Without `COLORTERM=truecolor|24bit`
   RGB becomes the nearest 256 color. A broken theme warns and falls back to `terminal`.
 - `cli`: own subcommands (`ls`, `add`, `rm`, `history`, `export`, `import`, `import-ssh-config`,
-  `ssh-config`); their names are in `model::RESERVED_ALIASES` (add any new subcommand there).
+  `ssh-config`, `themes`, `ignore`, `config`); their names are in `model::RESERVED_ALIASES` (add any new subcommand there).
 - `ssh_config`: ssh_config parser to import concrete `Host`s (follows `Include`, ignores wildcards,
   `Match` and the generated file `GENERATED_FILE_NAME`).
 - Imports: `Db::import_hosts` in one transaction; `--dry-run` = same transaction without commit.

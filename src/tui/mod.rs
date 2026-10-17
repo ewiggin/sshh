@@ -21,7 +21,7 @@ use ratatui::text::Line;
 
 use crate::db::{self, Db};
 use crate::model::{Host, HostData};
-use crate::{config, connect, include, theme};
+use crate::{config, connect, include, keys, theme};
 use app::{App, External, Focus, Mode, Outcome, Request, SessionKey, SessionKind, SessionState};
 use form::{Form, FormEvent, FormKind};
 use session::{CopyAction, Session};
@@ -38,13 +38,16 @@ pub fn run() -> Result<()> {
     if let Some(warning) = warning {
         app.error(warning);
     }
-    let restore_panes = match config::load() {
-        Ok(config) => config.restore_panes,
-        Err(e) => {
-            app.error(format!("{e:#}"));
-            false
-        }
-    };
+    let config = config::load().unwrap_or_else(|e| {
+        app.error(format!("{e:#}"));
+        config::Config::default()
+    });
+    let restore_panes = config.restore_panes;
+    let (keymap, warnings) = keys::Keymap::from_config(&config.keys);
+    app.keymap = keymap;
+    if !warnings.is_empty() {
+        app.error(warnings.join("; "));
+    }
     // Opened after the first draw, when the screen size is known.
     let startup = db.startup_layout(restore_panes).unwrap_or_else(|e| {
         app.error(format!("Could not restore the panes: {e:#}"));

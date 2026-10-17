@@ -14,7 +14,7 @@ use crate::db::{self, Db, ImportReport, OnConflict};
 use crate::include::{self, INCLUDE_LINE, IncludeState};
 use crate::model::{HostData, RESERVED_ALIASES, SshOption};
 use crate::ssh_args::{Destination, parse_option};
-use crate::{ssh_config, theme, tui};
+use crate::{keys, ssh_config, theme, tui};
 
 #[derive(Parser)]
 #[command(
@@ -72,6 +72,11 @@ enum Command {
         #[command(subcommand)]
         action: Option<SshConfigAction>,
     },
+    /// Show the settings in use (theme, panes on startup, pane shortcuts), or create the config file
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
     /// Destinations the wizard never asks to save (Ctrl-n in the wizard)
     Ignore {
         #[command(subcommand)]
@@ -82,6 +87,16 @@ enum Command {
         #[command(subcommand)]
         action: Option<ThemesAction>,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Print the effective settings; `*` marks what differs from the default (default)
+    Show,
+    /// Print the path of the config file
+    Path,
+    /// Write a config file with every setting commented out (refuses if one exists)
+    Init,
 }
 
 #[derive(Subcommand)]
@@ -205,9 +220,48 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::Import { file, opts } => import(file, opts),
         Command::ImportSshConfig { file, tags, opts } => import_ssh_config(file, tags, opts),
         Command::SshConfig { action } => ssh_config_cmd(action.unwrap_or(SshConfigAction::Status)),
+        Command::Config { action } => config_cmd(action.unwrap_or(ConfigAction::Show)),
         Command::Ignore { action } => ignore_cmd(action.unwrap_or(IgnoreAction::List)),
         Command::Themes { action } => themes_cmd(action.unwrap_or(ThemesAction::List)),
     }
+}
+
+fn config_cmd(action: ConfigAction) -> Result<()> {
+    let path = crate::config::file()?;
+    match action {
+        ConfigAction::Path => println!("{}", path.display()),
+        ConfigAction::Init => {
+            if path.exists() {
+                bail!("{} already exists (`sshh config` shows what it sets)", path.display());
+            }
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+            }
+            fs::write(&path, keys::default_config_file()).with_context(|| format!("writing {}", path.display()))?;
+            println!("Created {} (every setting commented out, with its default)", path.display());
+        }
+        ConfigAction::Show => {
+            let config = crate::config::load()?;
+            let state = if path.exists() { "" } else { " (doesn't exist: all defaults)" };
+            println!("# {}{state}", path.display());
+            let (theme, from) = theme::configured()?;
+            let mark = |changed: bool| if changed { "*" } else { " " };
+            println!("{} theme = '{theme}' (from {from})", mark(theme != theme::TERMINAL));
+            println!("{} restore_panes = {}", mark(config.restore_panes), config.restore_panes);
+            let (keymap, warnings) = keys::Keymap::from_config(&config.keys);
+            println!("\n[keys]");
+            for action in keys::Action::all() {
+                let specs: Vec<String> = keymap.keys(action).iter().map(keys::spec).collect();
+                let specs = if specs.is_empty() { "(none)".to_string() } else { specs.join(", ") };
+                let name = action.name();
+                println!("{} {name:<18} {specs:<22} {}", mark(!keymap.is_default(action)), action.description());
+            }
+            for warning in warnings {
+                eprintln!("sshh: {warning}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ignore_cmd(action: IgnoreAction) -> Result<()> {

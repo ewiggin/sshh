@@ -3,6 +3,7 @@ mod config;
 mod connect;
 mod db;
 mod include;
+mod keys;
 mod model;
 mod ssh_args;
 mod ssh_config;

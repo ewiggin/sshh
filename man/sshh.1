@@ -630,6 +630,15 @@ Include config.d/sshh.conf
 .EE
 .RE
 .TP
+.BR config " [" show | path | init ]
+Print the settings in use (theme, panes on startup and the pane shortcuts,
+with
+.B *
+marking what differs from the default), the path of the config file, or
+create it with every setting commented out (it refuses if the file exists).
+See
+.BR CONFIGURATION .
+.TP
 .BR ignore " [" list | "add \fIdestination\fR" | "rm \fIdestination\fR" ]
 List the destinations the wizard never asks to save (added with
 .B Ctrl\-n
@@ -666,6 +675,47 @@ exists: skip it (default), replace it, or import it as
 .TP
 .BR \-n ", " \-\-dry\-run
 Show what would be imported without saving anything.
+.SH CONFIGURATION
+.I ~/.config/sshh/config.toml
+.RI ( $XDG_CONFIG_HOME/sshh/config.toml )
+is optional:
+.B theme
+(see
+.BR THEMES ),
+.B restore_panes
+(see the Layouts tab) and a
+.B [keys]
+table that changes the pane shortcuts:
+.IB action " = \(dq" key \(dq
+or a list of keys.
+Setting an action replaces its default keys, and a key given to an action
+stops doing what it did by default.
+Keys need
+.B ctrl\-
+or
+.B alt\-
+(or are
+.BR f1 ... f12 ):
+.BR alt\-h ,
+.BR ctrl\-alt\-left ,
+.B alt\-H
+(Alt-Shift-h),
+.BR alt\-\- .
+Actions:
+.BR focus\-left ", " focus\-down ", " focus\-up ", " focus\-right ,
+.BR column\-1 ... column\-9 ,
+.BR next\-session ", " prev\-session ", " new\-column ", " new\-pane\-below ,
+.BR history ", " close\-pane ", " zoom ", " broadcast ,
+.BR move\-column\-left ", " move\-column\-right ", " stack ", " unstack .
+The help and the footer show the keys in use.
+An unknown action, an invalid key or two actions with the same key show a
+warning and keep the defaults of those actions.
+.PP
+.EX
+[keys]
+zoom = "ctrl\-alt\-z"
+focus\-left = ["alt\-h", "ctrl\-left"]
+.EE
 .SH THEMES
 The default theme,
 .BR terminal ,
