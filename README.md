@@ -248,8 +248,12 @@ a normal terminal (passwords, host key prompts, agent, full-screen programs like
 
 - It answers the queries programs send to their terminal (device attributes, cursor position,
   modes…), so programs like `fish` or `neovim` start without waiting for a timeout.
-- Programs that use the mouse (`htop`, `vim` with `mouse=a`, `mc`…) receive clicks, drags and the
-  wheel over their column. Hold `Shift` to select text with your terminal instead.
+- Programs that use the mouse (tmux with `mouse on`, `vim` with `mouse=a`, `htop`, `mc`…) receive
+  clicks and the wheel over their column, but **a drag still selects and copies text with sshh**
+  (only that pane's text, no `Shift` needed). `Ctrl`-drag sends the drag to the program instead (to
+  resize tmux panes or for vim's own visual selection). `mouse_drag = "program"` in
+  `~/.config/sshh/config.toml` sends everything to the program, as before; then `Shift`-drag is your
+  terminal's selection.
 - Drag over a column to **select text and copy it** to the clipboard when you release the button:
   only that pane's text, without borders or other columns.
 - It's resized with its column, keeps 5000 lines of history (mouse wheel, or `Alt-s` for history
@@ -423,7 +427,9 @@ filtered while you type and matching letters are highlighted.
 | Click on a column | focus it |
 | Drag over a column | select its text; releasing copies it to the clipboard (highlighted until the next click or key) |
 | Wheel | move · scroll the details · scroll back the history of the column under the pointer |
-| Click, drag, wheel on a program that uses the mouse | sent to that program (`Shift` to select text natively) |
+| Click, wheel on a program that uses the mouse | sent to that program |
+| Drag on a program that uses the mouse | selects and copies its text, like any pane (`Ctrl`-drag: sent to the program; with `mouse_drag = "program"` every drag goes to it) |
+| `Shift`-drag | your terminal's own selection (it can cross pane borders) |
 | Click on the search box | search |
 | Click on the details | focus them |
 | Click on a form field | edit that field |
@@ -748,7 +754,7 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
 - The schema migrates itself on startup.
-- Settings (the [theme](#themes) and `restore_panes`) in `~/.config/sshh/config.toml`
+- Settings (the [theme](#themes), `restore_panes` and `mouse_drag`) in `~/.config/sshh/config.toml`
   (`$XDG_CONFIG_HOME/sshh/config.toml`) and your themes in `~/.config/sshh/themes/`.
 - Optionally, `~/.ssh/config.d/sshh.conf` (see [Integration](#integration-with-ssh-scp-rsync-git)),
   generated from the database: SQLite remains the source of truth.

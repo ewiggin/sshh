@@ -16,6 +16,20 @@ pub struct Config {
     /// connecting), unless there is a default layout.
     #[serde(default)]
     pub restore_panes: bool,
+    /// What a drag does over a program that uses the mouse.
+    #[serde(default)]
+    pub mouse_drag: MouseDrag,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MouseDrag {
+    /// A drag selects text with sshh; clicks and the wheel still go to the
+    /// program, and Ctrl-drag sends the drag to it.
+    #[default]
+    Select,
+    /// Everything goes to the program (Shift-drag: the terminal's selection).
+    Program,
 }
 
 /// `$XDG_CONFIG_HOME/sshh`.
@@ -60,7 +74,10 @@ mod tests {
     fn parse_settings() {
         assert_eq!(from_toml::<Config>("").unwrap(), Config::default());
         let config: Config = from_toml("theme = \"monokai\"\nrestore_panes = true\n").unwrap();
-        assert_eq!(config, Config { theme: Some("monokai".into()), restore_panes: true });
+        assert_eq!(config, Config { theme: Some("monokai".into()), restore_panes: true, ..Config::default() });
+        let config: Config = from_toml("mouse_drag = \"program\"\n").unwrap();
+        assert_eq!(config.mouse_drag, MouseDrag::Program);
+        assert!(from_toml::<Config>("mouse_drag = \"never\"\n").is_err());
         // Unknown keys are allowed (for settings of newer versions).
         assert!(from_toml::<Config>("future = 1\n").is_ok());
         let e = from_toml::<Config>("restore_panes = \"yes\"\n").unwrap_err();
