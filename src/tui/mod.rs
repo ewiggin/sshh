@@ -38,13 +38,12 @@ pub fn run() -> Result<()> {
     if let Some(warning) = warning {
         app.error(warning);
     }
-    let restore_panes = match config::load() {
-        Ok(config) => config.restore_panes,
-        Err(e) => {
-            app.error(format!("{e:#}"));
-            false
-        }
-    };
+    let config = config::load().unwrap_or_else(|e| {
+        app.error(format!("{e:#}"));
+        config::Config::default()
+    });
+    let restore_panes = config.restore_panes;
+    app.mouse_drag = config.mouse_drag;
     // Opened after the first draw, when the screen size is known.
     let startup = db.startup_layout(restore_panes).unwrap_or_else(|e| {
         app.error(format!("Could not restore the panes: {e:#}"));
@@ -384,9 +383,11 @@ fn handle_request(
                 }
             }
         }
-        Request::Mouse(id, event) => {
+        Request::Mouse(id, events) => {
             if let Some(session) = sessions.get_mut(&id) {
-                session.send_mouse(event);
+                for event in events {
+                    session.send_mouse(event);
+                }
             }
         }
         Request::Scroll(id, delta) => {
