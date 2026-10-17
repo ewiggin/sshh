@@ -47,6 +47,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("Space (on a tag)", "filter the connections by it"),
     ("Alt-v (on a tag)", "open all its connections in panes"),
     ("Layouts tab", "a saves the panes, Space opens, r renames, dd deletes"),
+    ("* (on a layout)", "open it (without connecting) when sshh starts ★"),
     ("Esc", "back / clear search"),
     ("? then /", "search this help: n/N next/prev match, Esc clears"),
     ("", ""),
@@ -138,6 +139,8 @@ pub enum Request {
     /// Save a layout, replacing the one with the same name.
     SaveLayout(Layout),
     RenameLayout { from: String, to: String },
+    /// Make a layout the one opened at startup (`None`: no default).
+    DefaultLayout(Option<String>),
     DeleteLayout(String),
     /// Close every session of a connection.
     CloseSessions(i64),
@@ -960,8 +963,25 @@ impl App {
     /// sessions that aren't alive. The sessions of the panes it replaces keep
     /// running.
     fn open_layout(&mut self) {
-        let Some(layout) = self.selected_layout() else { return };
-        let name = layout.name.clone();
+        let Some(layout) = self.selected_layout().cloned() else { return };
+        self.place_layout(&layout, true);
+    }
+
+    /// The TUI just started: shows the panes of `layout` (the default one, or
+    /// those of the last session) without connecting them.
+    pub fn restore_layout(&mut self, layout: &Layout) {
+        self.place_layout(layout, false);
+    }
+
+    /// Shows the panes of a layout (rearranged if they don't fit) and, with
+    /// `connect`, asks for the sessions that aren't open.
+    fn place_layout(&mut self, layout: &Layout, connect: bool) {
+        // The hidden layout of the last session has no name.
+        let what = if layout.name.is_empty() {
+            "The panes of the last session".to_string()
+        } else {
+            format!("Layout '{}'", layout.name)
+        };
         let mut columns: Vec<Vec<SessionKey>> = layout
             .columns
             .iter()
@@ -975,7 +995,7 @@ impl App {
             .collect();
         let total: usize = columns.iter().map(Vec::len).sum();
         if total == 0 {
-            self.error(format!("Layout '{name}' has no connections left"));
+            self.error(format!("{what} has no connections left"));
             return;
         }
         let max_panes = self.max_panes_per_column();
@@ -987,14 +1007,32 @@ impl App {
             columns = self.grid(columns.into_iter().flatten().collect());
         }
         let shown: usize = columns.iter().map(Vec::len).sum();
-        self.show_panes(columns);
-        if shown < total {
-            self.error(format!("Layout '{name}': only {shown} of its {total} panes fit"));
-        } else if !fits {
-            self.info(format!("Layout '{name}' open, rearranged to fit"));
+        if connect {
+            self.show_panes(columns);
         } else {
-            self.info(format!("Layout '{name}' open"));
+            self.columns = columns;
+            self.zoomed = false;
+            self.focus = Focus::List;
+            self.active_column = 0;
+            self.active_row = 0;
         }
+        let open = if connect { "open" } else { "restored · Enter connects a pane" };
+        let only = if layout.name.is_empty() { "" } else { "its " };
+        if shown < total {
+            self.error(format!("{what}: only {shown} of {only}{total} panes fit"));
+        } else if !fits {
+            self.info(format!("{what} {open}, rearranged to fit"));
+        } else {
+            self.info(format!("{what} {open}"));
+        }
+    }
+
+    /// The open panes, as a layout stores them.
+    pub fn pane_layout(&self) -> Vec<Vec<(i64, bool)>> {
+        self.columns
+            .iter()
+            .map(|panes| panes.iter().map(|k| (k.host, k.kind == SessionKind::Sftp)).collect())
+            .collect()
     }
 
     /// Keys of the Tags and Layouts tabs; returns false for the general keys
@@ -1020,6 +1058,12 @@ impl App {
             KeyCode::Char('g') => self.pending = Some('g'),
             KeyCode::Char('a') if layouts => self.name_layout(),
             KeyCode::Char('r') if layouts => self.rename_layout(),
+            KeyCode::Char('*') if layouts => {
+                if let Some(layout) = self.selected_layout() {
+                    let name = (!layout.default).then(|| layout.name.clone());
+                    self.request = Some(Request::DefaultLayout(name));
+                }
+            }
             KeyCode::Char('d') if layouts && pending == Some('d') => {
                 if let Some(layout) = self.selected_layout() {
                     self.mode = Mode::ConfirmDeleteLayout { name: layout.name.clone() };
@@ -1482,7 +1526,7 @@ impl App {
                         .iter()
                         .map(|panes| panes.iter().map(|k| (k.host, k.kind == SessionKind::Sftp)).collect())
                         .collect();
-                    self.request = Some(Request::SaveLayout(Layout { name: name.trim().to_string(), columns }));
+                    self.request = Some(Request::SaveLayout(Layout { name: name.trim().to_string(), columns, default: false }));
                     self.mode = Mode::Normal;
                 }
                 KeyCode::Backspace => {
@@ -2257,7 +2301,7 @@ mod tests {
 
     fn layout() -> Layout {
         // Connection 99 no longer exists.
-        Layout { name: "ops".into(), columns: vec![vec![(1, false), (2, true)], vec![(99, false)], vec![(3, false)]] }
+        Layout { name: "ops".into(), columns: vec![vec![(1, false), (2, true)], vec![(99, false)], vec![(3, false)]], default: false }
     }
 
     #[test]
@@ -2283,12 +2327,45 @@ mod tests {
         app.on_key(key(KeyCode::Backspace));
         app.on_paste("s\n");
         app.on_key(key(KeyCode::Enter));
-        let saved = Layout { name: "ops".into(), columns: vec![vec![(2, false)], vec![(3, false)]] };
+        let saved = Layout { name: "ops".into(), columns: vec![vec![(2, false)], vec![(3, false)]], default: false };
         assert_eq!(app.request.take(), Some(Request::SaveLayout(saved)));
         assert!(matches!(app.mode, Mode::Normal));
         app.on_key(ch('a'));
         app.on_key(key(KeyCode::Esc));
         assert!(matches!(app.mode, Mode::Normal) && app.request.is_none());
+    }
+
+    #[test]
+    fn startup_restores_the_panes_without_connecting() {
+        let mut app = app_with_sessions();
+        app.columns.clear();
+        app.request = None;
+        app.restore_layout(&layout());
+        // Same panes as opening the layout, but no sessions are requested
+        // and the list keeps the focus.
+        assert_eq!(columns(&app), ["web1/db1", "dev"]);
+        assert_eq!(app.request, None);
+        assert_eq!(app.focus, Focus::List);
+        assert!(app.status.as_ref().is_some_and(|s| s.text.contains("Enter connects")));
+        let last = Layout { name: String::new(), ..layout() };
+        app.restore_layout(&last);
+        assert!(app.status.as_ref().is_some_and(|s| s.text.starts_with("The panes of the last session restored")));
+    }
+
+    #[test]
+    fn star_toggles_the_default_layout() {
+        let mut app = app();
+        app.set_layouts(vec![layout()], None);
+        app.on_key(ch('['));
+        app.on_key(ch('*'));
+        assert_eq!(app.request.take(), Some(Request::DefaultLayout(Some("ops".into()))));
+        app.set_layouts(vec![Layout { default: true, ..layout() }], None);
+        app.on_key(ch('*'));
+        assert_eq!(app.request.take(), Some(Request::DefaultLayout(None)));
+        // Elsewhere `*` does nothing.
+        app.on_key(key(KeyCode::Esc));
+        app.on_key(ch('*'));
+        assert_eq!(app.request, None);
     }
 
     #[test]
@@ -2345,7 +2422,7 @@ mod tests {
     #[test]
     fn dd_deletes_a_layout_after_confirming() {
         let mut app = app();
-        let empty = Layout { name: "old".into(), columns: Vec::new() };
+        let empty = Layout { name: "old".into(), columns: Vec::new(), default: false };
         app.set_layouts(vec![empty, layout()], Some("ops"));
         app.on_key(ch('['));
         assert_eq!(app.selected_layout().unwrap().name, "ops");

@@ -2,6 +2,13 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
+## Unreleased
+
+- **Panes on startup.** `*` in the Layouts tab makes a layout open when `sshh` starts (marked `★`);
+  without one, `restore_panes = true` in `~/.config/sshh/config.toml` brings back the panes you had
+  when you quit. They open without connecting: `Enter` connects each pane
+  ([#21](https://github.com/ewiggin/sshh/issues/21)).
+
 ## 0.9.3 — 2026-10-17
 
 - `Ctrl-n` in the wizard connects without saving and never asks again for that destination (for

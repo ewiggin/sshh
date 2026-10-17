@@ -11,7 +11,7 @@
 //! Themes are TOML files: built-in ones (`themes/` in the repository,
 //! embedded) and the user's in `$XDG_CONFIG_HOME/sshh/themes/<name>.toml`,
 //! which win over a built-in with the same name. The theme in use comes from
-//! `$SSHH_THEME`, then `theme = "…"` in `$XDG_CONFIG_HOME/sshh/config.toml`.
+//! `$SSHH_THEME`, then `theme = "…"` in config.toml (`config`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use ratatui::buffer::Buffer;
 use ratatui::style::Color;
 use serde::Deserialize;
+
+use crate::config;
 
 /// The theme that leaves the colors to the terminal.
 pub const TERMINAL: &str = "terminal";
@@ -118,7 +120,7 @@ impl Theme {
     }
 
     pub fn parse(name: &str, source: &str, depth: Depth) -> Result<Self> {
-        let file: ThemeFile = from_toml(source)?;
+        let file: ThemeFile = config::from_toml(source)?;
         let colors: Vec<Rgb> = file.palette.iter().map(|c| Rgb::parse(c)).collect::<Result<_>>()?;
         let ansi: [Rgb; 16] =
             colors.try_into().map_err(|c: Vec<Rgb>| anyhow!("palette has {} colors, it needs 16", c.len()))?;
@@ -207,38 +209,8 @@ fn nearest_256(Rgb(r, g, b): Rgb) -> u8 {
     if dist((value, value, value)) < cube_dist { (232 + gray) as u8 } else { cube as u8 }
 }
 
-/// Parses TOML with a one-line error (the TUI shows it in the footer).
-fn from_toml<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
-    toml::from_str(text).map_err(|e| {
-        let message = e.message().trim().replace('\n', " ");
-        match e.span() {
-            Some(span) => anyhow!("line {}: {message}", text[..span.start].matches('\n').count() + 1),
-            None => anyhow!("{message}"),
-        }
-    })
-}
-
-/// `$XDG_CONFIG_HOME/sshh` (default `~/.config/sshh`, also on macOS).
-pub fn config_dir() -> Result<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| directories::BaseDirs::new().map(|d| d.home_dir().join(".config")))
-        .ok_or_else(|| anyhow!("could not determine the config directory"))?;
-    Ok(config.join("sshh"))
-}
-
 pub fn themes_dir() -> Result<PathBuf> {
-    Ok(config_dir()?.join("themes"))
-}
-
-pub fn config_file() -> Result<PathBuf> {
-    Ok(config_dir()?.join("config.toml"))
-}
-
-#[derive(Deserialize, Default)]
-struct ConfigFile {
-    theme: Option<String>,
+    Ok(config::dir()?.join("themes"))
 }
 
 /// Name of the theme to use and where it comes from.
@@ -246,13 +218,7 @@ pub fn configured() -> Result<(String, &'static str)> {
     if let Some(name) = std::env::var("SSHH_THEME").ok().filter(|n| !n.is_empty()) {
         return Ok((name, "$SSHH_THEME"));
     }
-    let path = config_file()?;
-    let config: ConfigFile = match fs::read_to_string(&path) {
-        Ok(text) => from_toml(&text).with_context(|| format!("reading {}", path.display()))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ConfigFile::default(),
-        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-    };
-    Ok(match config.theme {
+    Ok(match config::load()?.theme {
         Some(name) => (name, "config.toml"),
         None => (TERMINAL.into(), "the default"),
     })
@@ -342,7 +308,7 @@ pub fn current() -> (Theme, Option<String>) {
 
 /// Sets `theme = "<name>"` in config.toml, keeping the rest of the file.
 pub fn save(name: &str) -> Result<PathBuf> {
-    let path = config_file()?;
+    let path = config::file()?;
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -485,7 +451,7 @@ mod tests {
         );
         // A `theme` key inside a table is not the top-level one.
         assert_eq!(set_theme("[x]\ntheme = 1\n", "a"), "theme = \"a\"\n[x]\ntheme = 1\n");
-        let config: ConfigFile = toml::from_str(&set_theme("# c\n", "m")).unwrap();
+        let config: crate::config::Config = toml::from_str(&set_theme("# c\n", "m")).unwrap();
         assert_eq!(config.theme.as_deref(), Some("m"));
     }
 }

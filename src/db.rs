@@ -66,6 +66,8 @@ CREATE TABLE ignored (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (user, hostname, port)
 );
+"#, r#"
+ALTER TABLE layouts ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
 "#];
 
 const HOST_SELECT: &str = "
@@ -290,8 +292,15 @@ impl Db {
     /// true if it replaced one.
     pub fn save_layout(&mut self, layout: &Layout) -> Result<bool> {
         let tx = self.conn.transaction()?;
+        // Replacing a layout keeps it as the default if it was.
+        let was_default: Option<bool> = tx
+            .query_row("SELECT is_default FROM layouts WHERE name = ?1", [&layout.name], |r| r.get(0))
+            .optional()?;
         let replaced = tx.execute("DELETE FROM layouts WHERE name = ?1", [&layout.name])? > 0;
-        tx.execute("INSERT INTO layouts (name) VALUES (?1)", [&layout.name])?;
+        tx.execute(
+            "INSERT INTO layouts (name, is_default) VALUES (?1, ?2)",
+            params![layout.name, was_default.unwrap_or(false)],
+        )?;
         let id = tx.last_insert_rowid();
         for (col, panes) in layout.columns.iter().enumerate() {
             for (row, (host, sftp)) in panes.iter().enumerate() {
@@ -328,16 +337,52 @@ impl Db {
     /// All layouts by name. Panes of deleted connections are gone, so a
     /// layout can have fewer panes than when it was saved (or none).
     pub fn list_layouts(&self) -> Result<Vec<Layout>> {
-        let mut stmt = self.conn.prepare("SELECT id, name FROM layouts ORDER BY name COLLATE NOCASE")?;
+        self.layouts_where("name != ''")
+    }
+
+    /// Marks `name` as the layout opened at startup (`None`: no default).
+    pub fn set_default_layout(&self, name: Option<&str>) -> Result<()> {
+        self.conn.execute("UPDATE layouts SET is_default = COALESCE(name = ?1, 0)", [name])?;
+        Ok(())
+    }
+
+    /// Saves the panes open when the TUI quits (none: forgets them).
+    pub fn save_last_panes(&mut self, columns: Vec<Vec<(i64, bool)>>) -> Result<()> {
+        if columns.iter().all(Vec::is_empty) {
+            self.delete_layout(LAST_PANES)?;
+            return Ok(());
+        }
+        self.save_layout(&Layout { name: LAST_PANES.into(), columns, default: false })?;
+        Ok(())
+    }
+
+    /// Panes to open when the TUI starts: the default layout, else (with
+    /// `restore_panes`) those of the last session. Empty ones (their
+    /// connections were deleted) are skipped.
+    pub fn startup_layout(&self, restore_panes: bool) -> Result<Option<Layout>> {
+        let has_panes = |l: &Layout| l.columns.iter().any(|c| !c.is_empty());
+        if let Some(layout) = self.layouts_where("is_default AND name != ''")?.into_iter().find(has_panes) {
+            return Ok(Some(layout));
+        }
+        if restore_panes {
+            return Ok(self.layouts_where("name = ''")?.into_iter().find(has_panes));
+        }
+        Ok(None)
+    }
+
+    fn layouts_where(&self, condition: &str) -> Result<Vec<Layout>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, name, is_default FROM layouts WHERE {condition} ORDER BY name COLLATE NOCASE"
+        ))?;
         let layouts = stmt
-            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut stmt = self
             .conn
             .prepare("SELECT col, host_id, sftp FROM layout_panes WHERE layout_id = ?1 ORDER BY col, row")?;
         layouts
             .into_iter()
-            .map(|(id, name)| {
+            .map(|(id, name, default)| {
                 let panes = stmt
                     .query_map([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, bool>(2)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -350,7 +395,7 @@ impl Db {
                     }
                     columns.last_mut().expect("just pushed").push((host, sftp));
                 }
-                Ok(Layout { name, columns })
+                Ok(Layout { name, columns, default })
             })
             .collect()
     }
@@ -385,7 +430,13 @@ pub struct ImportReport {
 pub struct Layout {
     pub name: String,
     pub columns: Vec<Vec<(i64, bool)>>,
+    /// Opened when the TUI starts (at most one layout is).
+    pub default: bool,
 }
+
+/// Name of the hidden layout with the panes of the last session (a layout
+/// name can't be empty, so it never clashes with the user's).
+const LAST_PANES: &str = "";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryEntry {
@@ -751,6 +802,43 @@ mod tests {
     }
 
     #[test]
+    fn default_layout_and_last_panes() {
+        let mut db = Db::open_in_memory().unwrap();
+        let a = db.insert_host(&sample("a")).unwrap();
+        let b = db.insert_host(&HostData { alias: "b".into(), hostname: "10.0.0.2".into(), ..Default::default() }).unwrap();
+        let layout = |name: &str, host| Layout { name: name.into(), columns: vec![vec![(host, false)]], default: false };
+        db.save_layout(&layout("ops", a)).unwrap();
+        db.save_layout(&layout("web", b)).unwrap();
+        assert_eq!(db.startup_layout(true).unwrap(), None);
+
+        // The last panes: hidden from the list, used only with restore_panes.
+        db.save_last_panes(vec![vec![(b, true)]]).unwrap();
+        assert_eq!(db.list_layouts().unwrap().len(), 2);
+        assert_eq!(db.startup_layout(false).unwrap(), None);
+        assert_eq!(db.startup_layout(true).unwrap().unwrap().columns, vec![vec![(b, true)]]);
+
+        // A default layout wins, and there is only one; replacing it keeps it.
+        db.set_default_layout(Some("ops")).unwrap();
+        db.set_default_layout(Some("web")).unwrap();
+        let defaults: Vec<String> =
+            db.list_layouts().unwrap().into_iter().filter(|l| l.default).map(|l| l.name).collect();
+        assert_eq!(defaults, ["web"]);
+        db.save_layout(&layout("web", a)).unwrap();
+        let startup = db.startup_layout(false).unwrap().unwrap();
+        assert_eq!((startup.name.as_str(), startup.default), ("web", true));
+        db.set_default_layout(None).unwrap();
+        assert!(db.list_layouts().unwrap().iter().all(|l| !l.default));
+
+        // No panes on quit forgets them; a layout left empty by deleted
+        // connections isn't restored.
+        db.save_last_panes(Vec::new()).unwrap();
+        assert_eq!(db.startup_layout(true).unwrap(), None);
+        db.save_last_panes(vec![vec![(b, false)]]).unwrap();
+        db.delete_by_alias("b").unwrap();
+        assert_eq!(db.startup_layout(true).unwrap(), None);
+    }
+
+    #[test]
     fn layouts_are_saved_replaced_and_follow_deleted_hosts() {
         let mut db = Db::open_in_memory().unwrap();
         let (a, b, c) = (
@@ -758,12 +846,12 @@ mod tests {
             db.insert_host(&sample("b")).unwrap(),
             db.insert_host(&sample("c")).unwrap(),
         );
-        let layout = Layout { name: "prod".into(), columns: vec![vec![(a, false), (b, true)], vec![(c, false)]] };
+        let layout = Layout { name: "prod".into(), columns: vec![vec![(a, false), (b, true)], vec![(c, false)]], default: false };
         assert!(!db.save_layout(&layout).unwrap());
-        db.save_layout(&Layout { name: "Alpha".into(), columns: vec![vec![(a, false)]] }).unwrap();
+        db.save_layout(&Layout { name: "Alpha".into(), columns: vec![vec![(a, false)]], default: false }).unwrap();
         assert_eq!(db.list_layouts().unwrap()[1], layout);
         // Same name: replaced.
-        let layout = Layout { name: "prod".into(), columns: vec![vec![(a, false)], vec![(c, false)]] };
+        let layout = Layout { name: "prod".into(), columns: vec![vec![(a, false)], vec![(c, false)]], default: false };
         assert!(db.save_layout(&layout).unwrap());
         assert_eq!(db.list_layouts().unwrap()[1], layout);
         // A deleted connection leaves its panes; an emptied column disappears.
@@ -774,7 +862,7 @@ mod tests {
         // Renamed, but not over another layout.
         assert!(db.rename_layout("prod", "Alpha").is_err());
         db.rename_layout("prod", "web").unwrap();
-        assert_eq!(db.list_layouts().unwrap()[1], Layout { name: "web".into(), columns: vec![vec![(c, false)]] });
+        assert_eq!(db.list_layouts().unwrap()[1], Layout { name: "web".into(), columns: vec![vec![(c, false)]], default: false });
         assert!(db.rename_layout("prod", "x").is_err());
         assert!(db.delete_layout("web").unwrap());
         assert!(!db.delete_layout("web").unwrap());

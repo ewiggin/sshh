@@ -19,9 +19,9 @@ use ratatui::layout::{Constraint, Layout, Position};
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
-use crate::db::Db;
+use crate::db::{self, Db};
 use crate::model::{Host, HostData};
-use crate::{connect, include, theme};
+use crate::{config, connect, include, theme};
 use app::{App, External, Focus, Mode, Outcome, Request, SessionKey, SessionKind, SessionState};
 use form::{Form, FormEvent, FormKind};
 use session::{CopyAction, Session};
@@ -38,10 +38,27 @@ pub fn run() -> Result<()> {
     if let Some(warning) = warning {
         app.error(warning);
     }
+    let restore_panes = match config::load() {
+        Ok(config) => config.restore_panes,
+        Err(e) => {
+            app.error(format!("{e:#}"));
+            false
+        }
+    };
+    // Opened after the first draw, when the screen size is known.
+    let startup = db.startup_layout(restore_panes).unwrap_or_else(|e| {
+        app.error(format!("Could not restore the panes: {e:#}"));
+        None
+    });
     let mut sessions = Sessions::new();
     let mut terminal = term::init()?;
-    let outcome = event_loop(&mut terminal, &mut db, &mut app, &mut sessions);
+    let outcome = event_loop(&mut terminal, &mut db, &mut app, &mut sessions, startup);
     term::restore();
+    if outcome.is_ok()
+        && let Err(e) = db.save_last_panes(app.pane_layout())
+    {
+        eprintln!("sshh: could not save the open panes: {e:#}");
+    }
     // Dropping the sessions hangs up the ssh processes still running.
     drop(sessions);
     match outcome? {
@@ -54,6 +71,7 @@ fn event_loop(
     db: &mut Db,
     app: &mut App,
     sessions: &mut Sessions,
+    mut startup: Option<db::Layout>,
 ) -> Result<Outcome> {
     // Set by the session reader threads when new output arrives.
     let dirty = Arc::new(AtomicBool::new(false));
@@ -64,6 +82,10 @@ fn event_loop(
             sync_sessions(sessions, app);
             terminal.draw(|frame| ui::draw(frame, app, sessions))?;
             redraw = resize_columns(sessions, app);
+            if let Some(layout) = startup.take() {
+                app.restore_layout(&layout);
+                redraw = true;
+            }
         }
         let timeout = if sessions.is_empty() { Duration::from_secs(1) } else { Duration::from_millis(15) };
         if !event::poll(timeout)? {
@@ -283,6 +305,17 @@ fn handle_request(
                 app.info(format!("Layout '{}' {what}", layout.name));
             }
             Err(e) => app.error(format!("Could not save the layout: {e:#}")),
+        },
+        Request::DefaultLayout(name) => match db.set_default_layout(name.as_deref()) {
+            Ok(()) => {
+                let selected = app.selected_layout().map(|l| l.name.clone());
+                app.set_layouts(db.list_layouts()?, selected.as_deref());
+                match name {
+                    Some(name) => app.info(format!("Layout '{name}' opens when sshh starts")),
+                    None => app.info("No layout opens when sshh starts"),
+                }
+            }
+            Err(e) => app.error(format!("Could not change the default layout: {e:#}")),
         },
         Request::RenameLayout { from, to } => match db.rename_layout(&from, &to) {
             Ok(()) => {

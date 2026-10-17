@@ -363,10 +363,20 @@ or
 opens the highlighted layout, replacing the current panes (their sessions
 keep running) and opening the sessions that aren't alive,
 .B r
-renames it (not to the name of another layout), and
+renames it (not to the name of another layout),
+.B *
+makes it the one opened when
+.B sshh
+starts (marked \[u2605]; again to unmark), and
 .B dd
 deletes it after confirming.
 The panes of a deleted connection disappear from the layouts.
+On startup the default layout opens or, without one and with
+.B restore_panes = true
+in the config file, the panes of the last session; either way
+.B without connecting
+(each pane shows
+.BR "no session \(md Enter connects" ).
 If the window is too small for the saved shape, the panes are rearranged
 in a grid and those that don't fit are not opened.
 Layouts are not part of
@@ -758,7 +768,11 @@ Generated ssh_config file, only when enabled with
 .BR "sshh ssh\-config sync" .
 .TP
 .I ~/.config/sshh/config.toml
-Settings: the theme
+Settings:
+.B theme
+and
+.B restore_panes
+(reopen the panes of the last session on startup, without connecting)
 .RI ( $XDG_CONFIG_HOME/sshh/config.toml
 if set; the same path on macOS).
 .TP

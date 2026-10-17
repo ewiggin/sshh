@@ -1,4 +1,5 @@
 mod cli;
+mod config;
 mod connect;
 mod db;
 mod include;

@@ -327,7 +327,13 @@ fn draw_layouts(frame: &mut Frame, app: &mut App, block: Block<'static>, area: R
     }
     let rows = app.layouts.iter().map(|l| {
         let panes: usize = l.columns.iter().map(Vec::len).sum();
-        Row::new([Cell::from(l.name.clone()), Cell::from(Line::from(panes.to_string()).right_aligned().dim())])
+        // ★ = the layout opened when sshh starts.
+        let name = if l.default {
+            Line::from(vec![l.name.clone().into(), " ★".fg(MATCH)])
+        } else {
+            Line::from(l.name.clone())
+        };
+        Row::new([Cell::from(name), Cell::from(Line::from(panes.to_string()).right_aligned().dim())])
     });
     let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
         .block(block)
@@ -793,6 +799,7 @@ fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
             ("Space", "open layout"),
             ("a", "save panes as layout"),
             ("r", "rename"),
+            ("*", "open at startup"),
             ("dd", "delete"),
             ("j/k", "move"),
             ("[ ]", "tabs"),
