@@ -5,8 +5,12 @@
 use std::fs;
 use std::path::PathBuf;
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
+
+use crate::keys::KeyList;
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Config {
@@ -16,6 +20,9 @@ pub struct Config {
     /// connecting), unless there is a default layout.
     #[serde(default)]
     pub restore_panes: bool,
+    /// Pane shortcuts by action name (see `keys`).
+    #[serde(default)]
+    pub keys: BTreeMap<String, KeyList>,
 }
 
 /// `$XDG_CONFIG_HOME/sshh`.
@@ -60,7 +67,7 @@ mod tests {
     fn parse_settings() {
         assert_eq!(from_toml::<Config>("").unwrap(), Config::default());
         let config: Config = from_toml("theme = \"monokai\"\nrestore_panes = true\n").unwrap();
-        assert_eq!(config, Config { theme: Some("monokai".into()), restore_panes: true });
+        assert_eq!(config, Config { theme: Some("monokai".into()), restore_panes: true, ..Config::default() });
         // Unknown keys are allowed (for settings of newer versions).
         assert!(from_toml::<Config>("future = 1\n").is_ok());
         let e = from_toml::<Config>("restore_panes = \"yes\"\n").unwrap_err();
