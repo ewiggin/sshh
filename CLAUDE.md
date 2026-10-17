@@ -68,7 +68,12 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
   asks for the missing sessions with `Request::OpenSessions`. Tags and Layouts share `on_side_key`.
   Layouts tab = `App::layouts` (`db::Layout`, tables `layouts` + `layout_panes`, which cascade when
   a connection is deleted): `a` saves the panes (`Mode::LayoutName` → `Request::SaveLayout`), Space
-  restores them (`App::open_layout`, `grid` if they don't fit), `dd` deletes.
+  restores them (`App::open_layout`, `grid` if they don't fit), `dd` deletes, `*` = default layout
+  (`layouts.is_default`, `Request::DefaultLayout`). On startup `Db::startup_layout` (default layout,
+  else the hidden `''` layout of the last panes if `config::Config::restore_panes`; saved on quit by
+  `save_last_panes`) is shown after the first draw by `App::restore_layout`, without connecting.
+- `config`: `$XDG_CONFIG_HOME/sshh/config.toml` (`config::load`, `config::from_toml` = one-line
+  errors); unknown keys allowed, a broken file warns and uses the defaults.
 - Shortcuts: vim/lazygit style. `Space` connects (shows the selection in the active column), `Enter`
   edits (like `e`); in the search box the list filters while typing and `Enter`/`Esc` go back.
   Others: `j/k`, `gg/G`, `Ctrl-d/u/f/b`, `/`, `a`, `e`, `t`, `dd`, `yy`, `s`, `c`,

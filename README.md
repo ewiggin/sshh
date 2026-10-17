@@ -343,12 +343,24 @@ tab:
 | `a` | save the current panes as a layout: type a name and press `Enter` (an existing name replaces that layout) |
 | `Space`, `Enter` | open the layout: its panes replace the current ones (their sessions keep running), opening the sessions that aren't alive |
 | `r` | rename the layout: edit the name and press `Enter` (it can't take the name of another layout) |
+| `*` | open this layout when `sshh` starts (marked `★`; again to unmark; only one layout can be) |
 | `dd` | delete the layout (asks for confirmation with `y`) |
 
 The details pane previews the panes of the highlighted layout. A layout keeps ssh and sftp panes; the
 panes of a deleted connection disappear from it. If the window is too small for the saved shape the
 panes are rearranged in a grid, and those that don't fit are not opened. Layouts are stored in the
 database but are not part of `sshh export`.
+
+**On startup** `sshh` shows the panes of the default layout (`★`) or, if there is none and
+`~/.config/sshh/config.toml` has `restore_panes = true`, the panes you had when you last quit. They
+open **without connecting**: each one says `no session · Enter connects`, so starting sshh never
+opens a pile of ssh connections (passphrases, 2FA, hosts that are down). Panes of deleted
+connections are left out.
+
+```toml
+# ~/.config/sshh/config.toml
+restore_panes = true
+```
 
 While a **terminal column has focus, every key goes to its ssh session** (including `Esc`, `Ctrl-c`,
 `q`, `Tab` and `Ctrl-w`), except the `Alt` shortcuts above. Note that `Alt-f` (readline: forward a
@@ -736,7 +748,7 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
 - The schema migrates itself on startup.
-- Settings (only the [theme](#themes) for now) in `~/.config/sshh/config.toml`
+- Settings (the [theme](#themes) and `restore_panes`) in `~/.config/sshh/config.toml`
   (`$XDG_CONFIG_HOME/sshh/config.toml`) and your themes in `~/.config/sshh/themes/`.
 - Optionally, `~/.ssh/config.d/sshh.conf` (see [Integration](#integration-with-ssh-scp-rsync-git)),
   generated from the database: SQLite remains the source of truth.

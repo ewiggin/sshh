@@ -279,7 +279,7 @@ fn themes_cmd(action: ThemesAction) -> Result<()> {
             }
             println!(
                 "Choose with `theme = \"<name>\"` in {}, $SSHH_THEME or `T` in the TUI.",
-                theme::config_file()?.display()
+                crate::config::file()?.display()
             );
             println!(
                 "Your themes go in {}/<name>.toml (`sshh themes show <name>` prints one to start from).",
