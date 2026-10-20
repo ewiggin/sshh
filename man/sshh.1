@@ -461,10 +461,15 @@ Clicking a column focuses it; dragging over it selects its text, which is
 copied to the clipboard when the button is released.
 The wheel moves through the list, scrolls the details or scrolls back the
 history of the column under the pointer.
-Programs that ask for the mouse receive the events over their column.
-Hold
-.B Shift
-to select text with the terminal's native selection.
+Programs that ask for the mouse (tmux, vim, htop\&...) receive clicks and the
+wheel over their column, but a drag still selects and copies its text;
+.BR Ctrl \-drag
+sends the drag to the program.
+With
+.B mouse_drag = \(dqprogram\(dq
+in the config file every event goes to the program.
+.BR Shift \-drag
+is the terminal's own selection.
 .SS Form
 The same form adds, edits and saves new connections in the wizard.
 .B Alias
@@ -770,10 +775,13 @@ Generated ssh_config file, only when enabled with
 .TP
 .I ~/.config/sshh/config.toml
 Settings:
-.B theme
-and
+.BR theme ,
 .B restore_panes
-(reopen the panes of the last session on startup, without connecting)
+(reopen the panes of the last session on startup, without connecting) and
+.B mouse_drag
+.RB ( select
+or
+.BR program )
 .RI ( $XDG_CONFIG_HOME/sshh/config.toml
 if set; the same path on macOS).
 .TP

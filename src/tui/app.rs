@@ -16,6 +16,7 @@ use ratatui::widgets::TableState;
 
 use super::form::{self, Form, FormEvent, FormKind};
 use crate::db::{HistoryEntry, Layout};
+use crate::config::MouseDrag;
 use crate::model::{Host, HostData};
 use crate::theme::Theme;
 
@@ -64,6 +65,8 @@ pub const HELP: &[(&str, &str)] = &[
     ("", ""),
     ("Click", "select · double click connects"),
     ("Wheel", "move · scroll details or session history"),
+    ("Drag", "select and copy a pane's text (also over tmux, vim…)"),
+    ("Ctrl-drag", "send the drag to the program in the pane"),
 ];
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -150,7 +153,7 @@ pub enum Request {
     /// Scroll a session's history (positive = back).
     Scroll(SessionKey, isize),
     /// Mouse event for a session's program, relative to its screen.
-    Mouse(SessionKey, MouseEvent),
+    Mouse(SessionKey, Vec<MouseEvent>),
     /// Enter history mode (move, search and copy lines) in a session.
     StartHistory(SessionKey),
     /// Key for a session in history mode.
@@ -477,6 +480,15 @@ pub struct App {
     pub stacked: bool,
     /// Colors applied after drawing (loaded by the main loop).
     pub theme: Theme,
+    /// What a drag does over a program that uses the mouse (config.toml).
+    pub mouse_drag: MouseDrag,
+    /// A left button press over a program that uses the mouse, held back
+    /// until we know whether it's a click (sent to the program on release) or
+    /// a drag (an sshh selection). Relative to the pane.
+    held_click: Option<(SessionKey, MouseEvent)>,
+    /// A Ctrl-drag in progress: its events go to this program (clamped to its
+    /// pane) until the button is released.
+    program_drag: Option<(SessionKey, Rect)>,
     matcher: Matcher,
     last_click: Option<(usize, Instant)>,
 }
@@ -521,6 +533,9 @@ impl App {
             portrait: false,
             stacked: false,
             theme: Theme::terminal(),
+            mouse_drag: MouseDrag::default(),
+            held_click: None,
+            program_drag: None,
             pane_areas: Vec::new(),
             matcher: Matcher::new(Config::DEFAULT),
             last_click: None,
@@ -1813,19 +1828,65 @@ impl App {
         let column_key = pane.and_then(|((c, r), _)| self.columns.get(c)?.get(r).copied());
         let in_terminal = column_key.is_some();
 
-        // A program that asked for the mouse (htop, vim…) gets the events over
-        // its column, except with Shift (native text selection).
+        // The rest of a Ctrl-drag goes to its program, wherever the pointer is.
+        if let Some((id, area)) = self.program_drag
+            && matches!(mouse.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_))
+        {
+            if matches!(mouse.kind, MouseEventKind::Up(_)) {
+                self.program_drag = None;
+            }
+            let column = pos.x.clamp(area.x, area.right().saturating_sub(1)) - area.x;
+            let row = pos.y.clamp(area.y, area.bottom().saturating_sub(1)) - area.y;
+            let modifiers = mouse.modifiers - KeyModifiers::CONTROL;
+            self.request = Some(Request::Mouse(id, vec![MouseEvent { column, row, modifiers, ..mouse }]));
+            return;
+        }
+        // A held press: released without moving, it was a click for the
+        // program; a drag makes it an sshh selection (below).
+        if let Some((id, down)) = self.held_click.take() {
+            match mouse.kind {
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.selection = None;
+                    let up = MouseEvent { kind: mouse.kind, ..down };
+                    self.request = Some(Request::Mouse(id, vec![down, up]));
+                    return;
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {}
+                _ => self.held_click = Some((id, down)),
+            }
+        }
+        // A program that asked for the mouse (htop, vim, tmux…) gets the
+        // events over its pane, except a drag (`mouse_drag = "select"`, the
+        // default: an sshh selection; Ctrl-drag sends it to the program) and
+        // Shift (the terminal's own selection, when the terminal passes it).
+        let selecting = self.selection.is_some_and(|s| !s.done)
+            && matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left));
         if matches!(self.mode, Mode::Normal)
+            && !selecting
             && !mouse.modifiers.contains(KeyModifiers::SHIFT)
             && let (Some(((column, row), area)), Some(id)) = (pane, column_key)
             && self.mouse_sessions.contains(&id)
             && self.sessions.get(&id) == Some(&SessionState::Alive)
         {
             if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                // Like any click, it clears the last selection.
+                self.selection = None;
                 self.focus_pane(column, row);
             }
             let relative = MouseEvent { column: pos.x - area.x, row: pos.y - area.y, ..mouse };
-            self.request = Some(Request::Mouse(id, relative));
+            if self.mouse_drag == MouseDrag::Select && mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.program_drag = Some((id, area));
+                    let modifiers = mouse.modifiers - KeyModifiers::CONTROL;
+                    self.request = Some(Request::Mouse(id, vec![MouseEvent { modifiers, ..relative }]));
+                } else {
+                    self.held_click = Some((id, relative));
+                    // Anchors the selection in case it becomes a drag.
+                    self.on_selection_mouse(mouse, Some((((column, row), area), id)));
+                }
+                return;
+            }
+            self.request = Some(Request::Mouse(id, vec![relative]));
             return;
         }
         if self.on_selection_mouse(mouse, pane.zip(column_key)) {
@@ -2187,11 +2248,25 @@ mod tests {
         let none = KeyModifiers::NONE;
         // db1 (column 1) runs a program that wants the mouse; dev's session ended.
         app.mouse_sessions.insert(SessionKey::ssh(2));
+        // A click is held until it's released, then goes to the program as a
+        // press and a release, relative to the column: (35, 5) in a column
+        // starting at (30, 1).
         app.on_mouse(at(MouseEventKind::Down(MouseButton::Left), 35, none));
         assert_eq!(app.active_column, 0);
-        // Relative to the column: (35, 5) in a column starting at (30, 1).
-        let expected = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: 4, modifiers: none };
-        assert_eq!(app.request.take(), Some(Request::Mouse(SessionKey::ssh(2), expected)));
+        assert_eq!(app.request, None);
+        app.on_mouse(at(MouseEventKind::Up(MouseButton::Left), 35, none));
+        let rel = |kind| MouseEvent { kind, column: 5, row: 4, modifiers: none };
+        assert_eq!(
+            app.request.take(),
+            Some(Request::Mouse(
+                SessionKey::ssh(2),
+                vec![rel(MouseEventKind::Down(MouseButton::Left)), rel(MouseEventKind::Up(MouseButton::Left))]
+            ))
+        );
+        assert_eq!(app.selection, None);
+        // Other buttons and the wheel go right away.
+        app.on_mouse(at(MouseEventKind::Down(MouseButton::Right), 35, none));
+        assert_eq!(app.request.take(), Some(Request::Mouse(SessionKey::ssh(2), vec![rel(MouseEventKind::Down(MouseButton::Right))])));
         app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
         assert!(matches!(app.request.take(), Some(Request::Mouse(k, _)) if k == SessionKey::ssh(2)));
         // With Shift, or without mouse mode, sshh handles it as before.
@@ -2200,6 +2275,45 @@ mod tests {
         app.mouse_sessions.clear();
         app.on_mouse(at(MouseEventKind::ScrollUp, 35, none));
         assert_eq!(app.request.take(), Some(Request::Scroll(SessionKey::ssh(2), 3)));
+    }
+
+    #[test]
+    fn dragging_over_a_program_that_uses_the_mouse_selects() {
+        let mut app = app_with_two_columns();
+        app.pane_areas = vec![((0, 0), Rect::new(30, 1, 40, 20)), ((1, 0), Rect::new(72, 1, 40, 20))];
+        let key = app.columns[0][0];
+        app.sessions.insert(key, SessionState::Alive);
+        app.mouse_sessions.insert(key);
+        let left = MouseButton::Left;
+        let at = |kind, column, modifiers| MouseEvent { kind, column, row: 5, modifiers };
+        let none = KeyModifiers::NONE;
+        // A drag: an sshh selection, copied on release; the program gets nothing.
+        app.on_mouse(at(MouseEventKind::Down(left), 35, none));
+        app.on_mouse(at(MouseEventKind::Drag(left), 40, none));
+        app.on_mouse(at(MouseEventKind::Drag(left), 45, none));
+        assert_eq!(app.request, None);
+        app.on_mouse(at(MouseEventKind::Up(left), 45, none));
+        assert_eq!(app.request.take(), Some(Request::CopySelection(key, (4, 5), (4, 15))));
+
+        // Ctrl-drag: everything goes to the program, without Ctrl, clamped to
+        // the pane when the pointer leaves it.
+        let ctrl = KeyModifiers::CONTROL;
+        let rel = |kind, column| MouseEvent { kind, column, row: 4, modifiers: none };
+        app.on_mouse(at(MouseEventKind::Down(left), 35, ctrl));
+        assert_eq!(app.request.take(), Some(Request::Mouse(key, vec![rel(MouseEventKind::Down(left), 5)])));
+        app.on_mouse(at(MouseEventKind::Drag(left), 90, ctrl));
+        assert_eq!(app.request.take(), Some(Request::Mouse(key, vec![rel(MouseEventKind::Drag(left), 39)])));
+        app.on_mouse(at(MouseEventKind::Up(left), 90, none));
+        assert_eq!(app.request.take(), Some(Request::Mouse(key, vec![rel(MouseEventKind::Up(left), 39)])));
+        assert_eq!(app.selection, None);
+
+        // mouse_drag = "program": as before, everything goes to the program.
+        app.mouse_drag = MouseDrag::Program;
+        app.on_mouse(at(MouseEventKind::Down(left), 35, none));
+        assert_eq!(app.request.take(), Some(Request::Mouse(key, vec![rel(MouseEventKind::Down(left), 5)])));
+        app.on_mouse(at(MouseEventKind::Drag(left), 40, none));
+        assert_eq!(app.request.take(), Some(Request::Mouse(key, vec![rel(MouseEventKind::Drag(left), 10)])));
+        assert_eq!(app.selection, None);
     }
 
     #[test]

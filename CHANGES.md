@@ -4,6 +4,11 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
 ## 0.9.4 — 2026-10-20
 
+- **Select text over tmux, vim and other programs that use the mouse** without holding `Shift`: a
+  drag selects and copies that pane's text, while clicks and the wheel still go to the program.
+  `Ctrl`-drag sends the drag to the program; `mouse_drag = "program"` in
+  `~/.config/sshh/config.toml` restores the old behaviour
+  ([#11](https://github.com/ewiggin/sshh/issues/11)).
 - **Panes on startup.** `*` in the Layouts tab makes a layout open when `sshh` starts (marked `★`);
   without one, `restore_panes = true` in `~/.config/sshh/config.toml` brings back the panes you had
   when you quit. They open without connecting: `Enter` connects each pane
