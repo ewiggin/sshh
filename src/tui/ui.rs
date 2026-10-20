@@ -31,6 +31,21 @@ const MATCH: Color = Color::Yellow;
 const TAG: Color = Color::Magenta;
 const CONNECTED: Color = Color::Green;
 const BROADCAST: Color = Color::Red;
+/// Background of the selected row: color8 ("dim / inactive" in base16
+/// themes); sshh themes turn it into a tint of the accent (`theme`).
+pub const SELECTION: Color = Color::DarkGray;
+
+/// The selected row: a background band that keeps the colors of its text,
+/// bold while its pane has the focus.
+fn selection(focused: bool) -> Style {
+    let style = Style::new().bg(SELECTION);
+    if focused { style.bold() } else { style }
+}
+
+/// Mark left of the selected row: the accent while its pane has the focus.
+fn selection_mark(focused: bool) -> Span<'static> {
+    if focused { "▌".fg(ACCENT) } else { " ".into() }
+}
 
 /// Below this width the list goes on top and the panes below it (lazygit's
 /// portrait mode).
@@ -128,8 +143,9 @@ fn draw_themes(frame: &mut Frame, picker: &ThemePicker) {
         .title_bottom(Line::from(" Enter save · Esc cancel ".dim()).right_aligned());
     let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
         .block(block)
-        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-        .highlight_spacing(HighlightSpacing::Never);
+        .row_highlight_style(selection(true))
+        .highlight_symbol(selection_mark(true))
+        .highlight_spacing(HighlightSpacing::Always);
     let mut state = TableState::default().with_selected(Some(picker.selected));
     frame.render_stateful_widget(table, area, &mut state);
 }
@@ -241,6 +257,7 @@ fn list_block(app: &mut App, area: Rect) -> Block<'static> {
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    let focused = pane_focused(app, Focus::List);
     let block = list_block(app, area);
     app.rows_area = block.inner(area);
     match app.tab {
@@ -289,13 +306,15 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let table = Table::new(rows, [Constraint::Length(1), Constraint::Length(3), Constraint::Fill(1)])
         .block(block)
         .column_spacing(1)
-        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-        .highlight_spacing(HighlightSpacing::Never);
+        .row_highlight_style(selection(focused))
+        .highlight_symbol(selection_mark(focused))
+        .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(table, area, &mut app.table);
 }
 
 /// The Tags tab: every tag with its number of connections.
 fn draw_tags(frame: &mut Frame, app: &mut App, block: Block<'static>, area: Rect) {
+    let focused = pane_focused(app, Focus::List);
     if app.tags.is_empty() {
         let p = Paragraph::new("No tags yet.\nAdd them with 't'.").dim().centered();
         let [middle] = Layout::vertical([Constraint::Length(2)]).flex(Flex::Center).areas(app.rows_area);
@@ -311,13 +330,15 @@ fn draw_tags(frame: &mut Frame, app: &mut App, block: Block<'static>, area: Rect
     });
     let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
         .block(block)
-        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-        .highlight_spacing(HighlightSpacing::Never);
+        .row_highlight_style(selection(focused))
+        .highlight_symbol(selection_mark(focused))
+        .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(table, area, &mut app.tag_table);
 }
 
 /// The Layouts tab: every saved layout with its number of panes.
 fn draw_layouts(frame: &mut Frame, app: &mut App, block: Block<'static>, area: Rect) {
+    let focused = pane_focused(app, Focus::List);
     if app.layouts.is_empty() {
         let p = Paragraph::new("No layouts yet.\nOpen some panes and press 'a'.").dim().centered();
         let [middle] = Layout::vertical([Constraint::Length(2)]).flex(Flex::Center).areas(app.rows_area);
@@ -337,8 +358,9 @@ fn draw_layouts(frame: &mut Frame, app: &mut App, block: Block<'static>, area: R
     });
     let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(5)])
         .block(block)
-        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-        .highlight_spacing(HighlightSpacing::Never);
+        .row_highlight_style(selection(focused))
+        .highlight_symbol(selection_mark(focused))
+        .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(table, area, &mut app.layout_table);
 }
 
@@ -897,7 +919,7 @@ fn draw_help(frame: &mut Frame, help: &mut HelpState) {
             );
             spans.extend(highlighted(desc, desc_hl));
             let line = Line::from(spans);
-            if current == Some(i) { line.style(Style::new().add_modifier(Modifier::REVERSED)) } else { line }
+            if current == Some(i) { line.style(selection(true)) } else { line }
         })
         .collect();
     let mut title = "Help".to_string();

@@ -508,6 +508,7 @@ match = "#fabd2f"      # yellow: search matches
 tag = "#d3869b"        # magenta: tags
 connected = "#b8bb26"  # green: live sessions
 danger = "#fb4934"     # red: broadcast, confirmations, errors
+selection = "#3f4744"  # selected row (by default the accent blended into the background)
 ```
 
 Truecolor terminals (those that set `COLORTERM=truecolor` or `24bit`, like iTerm2, Ghostty, kitty

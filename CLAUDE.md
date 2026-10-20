@@ -18,7 +18,8 @@ Used as `sshh [ssh args]` (optionally `alias ssh=sshh`).
 - Colors: draw only with the 16 ANSI colors + default fg/bg + modifiers (no `Color::Indexed`/`Rgb`),
   so with the default `terminal` theme the UI follows the terminal theme (Omarchy themes set the
   palette; color4/blue = accent). Other themes (`theme.rs`) recolor the buffer after drawing
-  (`Theme::apply`): named colors = sshh's UI (overridable roles in `[ui]`), `Indexed(0..15)` = the
+  (`Theme::apply`): named colors (bg `DarkGray` = `ui::SELECTION`, the selected row: a tint of the
+  accent, `[ui] selection`) = sshh's UI (overridable roles in `[ui]`), `Indexed(0..15)` = the
   panes (tui-term), both from the palette; 256/RGB from remote programs untouched.
 - Option values: use `model::config_value` (only quotes single-value options; multi-argument ones
   like `LocalForward 8080 host:80` must not be quoted).

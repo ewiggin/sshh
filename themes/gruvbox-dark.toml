@@ -12,6 +12,7 @@ palette = [
 
 # Colors of sshh itself; each one defaults to its ANSI color of the palette
 # (accent = blue, match = yellow, tag = magenta, connected = green,
-# danger = red).
+# danger = red; selection, the selected row's background, is a tint of the
+# accent).
 [ui]
 accent = "#83a598"

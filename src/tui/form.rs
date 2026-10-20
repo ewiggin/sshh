@@ -3,11 +3,11 @@
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Flex, Layout, Position, Rect};
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use super::ui::{ACCENT, block};
+use super::ui::{ACCENT, SELECTION, block};
 use crate::model::{HostData, SshOption, validate_alias, validate_tmux_session};
 use crate::ssh_args::parse_option;
 
@@ -385,8 +385,7 @@ impl Form {
             frame.render_widget(Span::styled(format!("{marker}{label}"), label_style), label_area);
 
             let field = &self.fields[i];
-            // DarkGray is ANSI color8 ("dim / inactive" in base16 themes).
-            let bg = if focused { Style::new().bg(Color::DarkGray) } else { Style::new() };
+            let bg = if focused { Style::new().bg(SELECTION) } else { Style::new() };
             if field.value.is_empty() {
                 frame.render_widget(Paragraph::new(hint.dim()).style(bg), input);
             } else {

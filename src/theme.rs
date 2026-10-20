@@ -55,6 +55,12 @@ impl Rgb {
         let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0);
         Ok(Self(byte(0), byte(2), byte(4)))
     }
+
+    /// `self` with `amount` (0..=1) of `other`.
+    fn mix(self, other: Self, amount: f32) -> Self {
+        let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
+        Self(mix(self.0, other.0), mix(self.1, other.1), mix(self.2, other.2))
+    }
 }
 
 /// How the terminal shows RGB colors.
@@ -82,6 +88,8 @@ struct Palette {
     ansi: [Rgb; 16],
     /// Overrides of sshh's own colors, by ANSI index (accent = 4…).
     ui: [Option<Rgb>; 16],
+    /// Background of the selected row (`ui::SELECTION`).
+    selection: Rgb,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +120,7 @@ struct UiFile {
     tag: Option<String>,
     connected: Option<String>,
     danger: Option<String>,
+    selection: Option<String>,
 }
 
 impl Theme {
@@ -125,18 +134,20 @@ impl Theme {
         let ansi: [Rgb; 16] =
             colors.try_into().map_err(|c: Vec<Rgb>| anyhow!("palette has {} colors, it needs 16", c.len()))?;
         let mut ui = [None; 16];
-        let UiFile { accent, match_, tag, connected, danger } = file.ui;
+        let UiFile { accent, match_, tag, connected, danger, selection } = file.ui;
         for (index, color) in [(4, accent), (3, match_), (5, tag), (2, connected), (1, danger)] {
             if let Some(color) = color {
                 ui[index] = Some(Rgb::parse(&color)?);
             }
         }
-        let palette = Palette {
-            background: Rgb::parse(&file.background)?,
-            foreground: Rgb::parse(&file.foreground)?,
-            ansi,
-            ui,
+        let background = Rgb::parse(&file.background)?;
+        // By default a tint of the accent over the background: the row stands
+        // out without taking the colors of its text.
+        let selection = match selection {
+            Some(color) => Rgb::parse(&color)?,
+            None => background.mix(ui[4].unwrap_or(ansi[4]), 0.25),
         };
+        let palette = Palette { background, foreground: Rgb::parse(&file.foreground)?, ansi, ui, selection };
         Ok(Self { name: name.into(), palette: Some(palette), depth })
     }
 
@@ -145,7 +156,11 @@ impl Theme {
         let Some(palette) = &self.palette else { return };
         for cell in &mut buf.content {
             cell.fg = self.map(palette, cell.fg, palette.foreground);
-            cell.bg = self.map(palette, cell.bg, palette.background);
+            cell.bg = if cell.bg == Color::DarkGray {
+                self.depth_of(palette.selection)
+            } else {
+                self.map(palette, cell.bg, palette.background)
+            };
         }
     }
 
@@ -162,6 +177,10 @@ impl Theme {
                 palette.ui[i].unwrap_or(palette.ansi[i])
             }
         };
+        self.depth_of(rgb)
+    }
+
+    fn depth_of(&self, rgb: Rgb) -> Color {
         match self.depth {
             Depth::TrueColor => Color::Rgb(rgb.0, rgb.1, rgb.2),
             Depth::Ansi256 => Color::Indexed(nearest_256(rgb)),
@@ -376,6 +395,28 @@ mod tests {
             palette.join(", ")
         );
         Theme::parse("sample", &source, depth).unwrap()
+    }
+
+    #[test]
+    fn selection_is_a_tint_of_the_accent_unless_set() {
+        let theme = sample(Depth::TrueColor);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 2, 1));
+        buf[(0, 0)].bg = Color::DarkGray;
+        buf[(1, 0)].fg = Color::DarkGray;
+        theme.apply(&mut buf);
+        // A quarter of #abcdef over #101010; as a foreground, DarkGray is color8.
+        assert_eq!(buf[(0, 0)].bg, Color::Rgb(0x37, 0x3f, 0x48));
+        assert_eq!(buf[(1, 0)].fg, Color::Rgb(0, 0, 8));
+
+        let palette: Vec<String> = (0..16).map(|_| "\"#000000\"".to_string()).collect();
+        let source = format!(
+            "background = \"#101010\"\nforeground = \"#f0f0f0\"\npalette = [{}]\n[ui]\nselection = \"#203040\"\n",
+            palette.join(", ")
+        );
+        let theme = Theme::parse("x", &source, Depth::TrueColor).unwrap();
+        buf[(0, 0)].bg = Color::DarkGray;
+        theme.apply(&mut buf);
+        assert_eq!(buf[(0, 0)].bg, Color::Rgb(0x20, 0x30, 0x40));
     }
 
     #[test]
