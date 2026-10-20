@@ -2,7 +2,7 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
-## Unreleased
+## 0.9.4 — 2026-10-20
 
 - **Panes on startup.** `*` in the Layouts tab makes a layout open when `sshh` starts (marked `★`);
   without one, `restore_panes = true` in `~/.config/sshh/config.toml` brings back the panes you had
