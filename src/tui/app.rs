@@ -16,6 +16,7 @@ use ratatui::widgets::TableState;
 
 use super::form::{self, Form, FormEvent, FormKind};
 use crate::db::{HistoryEntry, Layout};
+use crate::keys::{Action, Keymap};
 use crate::model::{Host, HostData};
 use crate::theme::Theme;
 
@@ -65,6 +66,47 @@ pub const HELP: &[(&str, &str)] = &[
     ("Click", "select · double click connects"),
     ("Wheel", "move · scroll details or session history"),
 ];
+
+/// The label of `default` (a key column of the help or the footer) with the
+/// effective keys: unchanged while those actions keep their default keys.
+pub fn key_label(keymap: &Keymap, default: &str) -> String {
+    use Action::*;
+    let focus = [FocusLeft, FocusDown, FocusUp, FocusRight];
+    let actions: &[Action] = match default {
+        "Alt-v" => &[NewColumn],
+        "Alt--" => &[NewPaneBelow],
+        "Alt-v/-" => &[NewColumn, NewPaneBelow],
+        "Alt-h/j/k/l" | "Alt-hjkl" => &focus,
+        "Alt-l" => &[FocusRight],
+        "Alt-J" => &[Stack],
+        "Alt-K" => &[Unstack],
+        "Alt-J/K" => &[Stack, Unstack],
+        "Alt-H / Alt-L" => &[MoveColumnLeft, MoveColumnRight],
+        "Alt-n / Alt-p" | "Alt-n/p" => &[NextSession, PrevSession],
+        "Alt-w" => &[ClosePane],
+        "Alt-f / Alt-z" | "Alt-f" => &[Zoom],
+        "Alt-s" => &[History],
+        "Alt-a" => &[Broadcast],
+        "Alt-1 … Alt-9" => {
+            let columns: Vec<Action> = (1..=9).map(Column).collect();
+            if columns.iter().all(|a| keymap.is_default(*a)) {
+                return default.to_string();
+            }
+            return format!("{} … {}", keymap.first(Column(1)), keymap.first(Column(9)));
+        }
+        "Alt-v (on a tag)" if !keymap.is_default(NewColumn) => {
+            return format!("{} (on a tag)", keymap.first(NewColumn));
+        }
+        "Esc Alt-h" if !keymap.is_default(FocusLeft) => return format!("Esc {}", keymap.first(FocusLeft)),
+        _ => return default.to_string(),
+    };
+    keymap.label(actions, default)
+}
+
+/// The help with the effective keys.
+pub fn help_lines(keymap: &Keymap) -> Vec<(String, &'static str)> {
+    HELP.iter().map(|(key, desc)| (key_label(keymap, key), *desc)).collect()
+}
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Narrowest terminal column allowed when splitting.
@@ -273,7 +315,7 @@ impl HelpState {
 
     /// Fuzzy search, like the connection list, over each line's key and
     /// description; the current match is the first one from the top of the view.
-    fn search(&mut self, matcher: &mut Matcher) {
+    fn search(&mut self, lines: &[(String, &str)], matcher: &mut Matcher) {
         self.matches.clear();
         self.current = None;
         if self.query.trim().is_empty() {
@@ -282,7 +324,7 @@ impl HelpState {
         let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
         let mut buf = Vec::new();
         let mut indices = Vec::new();
-        for (line, (key, desc)) in HELP.iter().enumerate() {
+        for (line, (key, desc)) in lines.iter().enumerate() {
             if key.is_empty() && desc.is_empty() {
                 continue;
             }
@@ -477,6 +519,8 @@ pub struct App {
     pub stacked: bool,
     /// Colors applied after drawing (loaded by the main loop).
     pub theme: Theme,
+    /// Pane shortcuts (loaded by the main loop from config.toml).
+    pub keymap: Keymap,
     matcher: Matcher,
     last_click: Option<(usize, Instant)>,
 }
@@ -521,6 +565,7 @@ impl App {
             portrait: false,
             stacked: false,
             theme: Theme::terminal(),
+            keymap: Keymap::default(),
             pane_areas: Vec::new(),
             matcher: Matcher::new(Config::DEFAULT),
             last_click: None,
@@ -1317,51 +1362,42 @@ impl App {
     }
 
     /// Alt shortcuts: panes, focus and sessions, from anywhere.
+    /// Pane shortcuts (`keys::Keymap`, Alt keys by default); returns false
+    /// if `key` isn't one of them.
     fn on_alt_key(&mut self, key: KeyEvent) -> bool {
-        if !key.modifiers.contains(KeyModifiers::ALT) {
-            return false;
-        }
+        let Some(action) = self.keymap.action(key) else { return false };
         let in_terminal = self.focus == Focus::Terminal;
         let (column, row) = (self.active_column, self.active_row);
-        match key.code {
-            // Panes one under the other: j/k (and l) go through all of them,
-            // h back to the list.
-            KeyCode::Char('j' | 'l') | KeyCode::Down | KeyCode::Right if in_terminal && self.stacked => {
-                self.focus_stacked(true);
-            }
-            KeyCode::Char('k') | KeyCode::Up if in_terminal && self.stacked => self.focus_stacked(false),
-            KeyCode::Char('h') | KeyCode::Left if in_terminal && self.stacked => {
-                self.focus = Focus::List;
-                self.zoomed = false;
-            }
+        let stacked = in_terminal && self.stacked;
+        match action {
+            // Panes one under the other: down/right (and up) go through all of
+            // them, left back to the list.
+            Action::FocusDown | Action::FocusRight if stacked => self.focus_stacked(true),
+            Action::FocusUp if stacked => self.focus_stacked(false),
             // Focus, like vim; the list is the leftmost column.
-            KeyCode::Char('h') | KeyCode::Left if in_terminal && column > 0 => {
-                self.focus_pane(column - 1, row);
-            }
-            KeyCode::Char('h') | KeyCode::Left => {
+            Action::FocusLeft if in_terminal && !stacked && column > 0 => self.focus_pane(column - 1, row),
+            Action::FocusLeft => {
                 self.focus = Focus::List;
                 self.zoomed = false;
             }
-            KeyCode::Char('l') | KeyCode::Right if in_terminal => self.focus_pane(column + 1, row),
-            KeyCode::Char('l') | KeyCode::Right => self.focus_pane(0, row),
-            KeyCode::Char('j') | KeyCode::Down if in_terminal => self.focus_pane(column, row + 1),
-            KeyCode::Char('k') | KeyCode::Up if in_terminal => {
-                self.focus_pane(column, row.saturating_sub(1));
-            }
+            Action::FocusRight if in_terminal => self.focus_pane(column + 1, row),
+            Action::FocusRight => self.focus_pane(0, row),
+            Action::FocusDown if in_terminal => self.focus_pane(column, row + 1),
+            Action::FocusUp if in_terminal => self.focus_pane(column, row.saturating_sub(1)),
             // In the list: the next / previous connection with a session.
-            KeyCode::Char('j') | KeyCode::Down => self.switch_session(true),
-            KeyCode::Char('k') | KeyCode::Up => self.switch_session(false),
-            KeyCode::Char(c @ '1'..='9') => self.focus_column(usize::from(c as u8 - b'1')),
+            Action::FocusDown => self.switch_session(true),
+            Action::FocusUp => self.switch_session(false),
+            Action::Column(n) => self.focus_column(usize::from(n - 1)),
             // The session shown in the active pane.
-            KeyCode::Char('n') => self.cycle_column_session(true),
-            KeyCode::Char('p') => self.cycle_column_session(false),
+            Action::NextSession => self.cycle_column_session(true),
+            Action::PrevSession => self.cycle_column_session(false),
             // In the Tags tab: every connection of the tag, in panes.
-            KeyCode::Char('v') if !in_terminal && self.tab == ListTab::Tags => self.open_tag(),
+            Action::NewColumn if !in_terminal && self.tab == ListTab::Tags => self.open_tag(),
             // Splits: a column on the right, or a pane below the last column.
-            KeyCode::Char('v') => self.open_in_column(SessionKind::Ssh, true),
-            KeyCode::Char('-') => self.open_below(),
+            Action::NewColumn => self.open_in_column(SessionKind::Ssh, true),
+            Action::NewPaneBelow => self.open_below(),
             // History mode for the active pane's session.
-            KeyCode::Char('s') => {
+            Action::History => {
                 if let Some(key) = self.active_key().filter(|k| self.sessions.contains_key(k)) {
                     self.focus_pane(column, row);
                     if !self.history_sessions.contains(&key) {
@@ -1369,7 +1405,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('w') => {
+            Action::ClosePane => {
                 let pane = if in_terminal {
                     Some((column, row))
                 } else {
@@ -1386,36 +1422,36 @@ impl App {
                 }
             }
             // Full screen for the active pane, inside sshh.
-            KeyCode::Char('f' | 'z') if !self.columns.is_empty() => {
+            Action::Zoom if !self.columns.is_empty() => {
                 self.zoomed = !self.zoomed;
                 if self.zoomed {
                     self.focus_pane(column, row);
                 }
             }
-            KeyCode::Char('f' | 'z') => {}
+            Action::Zoom => {}
             // Broadcast: what is typed in a pane goes to every visible one.
-            KeyCode::Char('a') if self.broadcast => {
+            Action::Broadcast if self.broadcast => {
                 self.broadcast = false;
                 self.info("Broadcast off");
             }
-            KeyCode::Char('a') if self.columns.is_empty() => self.error("Broadcast needs an open pane"),
-            KeyCode::Char('a') => {
+            Action::Broadcast if self.columns.is_empty() => self.error("Broadcast needs an open pane"),
+            Action::Broadcast => {
                 self.broadcast = true;
-                self.info("Broadcast on: keys go to every visible pane (Alt-a stops it)");
+                let stop = self.keymap.first(Action::Broadcast);
+                self.info(format!("Broadcast on: keys go to every visible pane ({stop} stops it)"));
             }
-            // With Shift, move: H/L the column, J stacks the pane, K unstacks it.
-            KeyCode::Char('H') if in_terminal && column > 0 => {
+            // Move: the column, or stack / unstack the pane.
+            Action::MoveColumnLeft if in_terminal && column > 0 => {
                 self.columns.swap(column, column - 1);
                 self.focus_pane(column - 1, row);
             }
-            KeyCode::Char('L') if in_terminal && column + 1 < self.columns.len() => {
+            Action::MoveColumnRight if in_terminal && column + 1 < self.columns.len() => {
                 self.columns.swap(column, column + 1);
                 self.focus_pane(column + 1, row);
             }
-            KeyCode::Char('J') if in_terminal => self.stack_pane(),
-            KeyCode::Char('K') if in_terminal => self.unstack_pane(),
-            KeyCode::Char('H' | 'L' | 'J' | 'K') => {}
-            _ => return false,
+            Action::Stack if in_terminal => self.stack_pane(),
+            Action::Unstack if in_terminal => self.unstack_pane(),
+            Action::MoveColumnLeft | Action::MoveColumnRight | Action::Stack | Action::Unstack => {}
         }
         true
     }
@@ -1588,22 +1624,23 @@ impl App {
 
     /// Keys in the help: scroll, search (`/`, `n`/`N`) and close.
     fn on_help_key(&mut self, key: KeyEvent, ctrl: bool) {
+        let lines = help_lines(&self.keymap);
         let Mode::Help(help) = &mut self.mode else { return };
         if help.typing {
             match key.code {
                 KeyCode::Esc => {
                     help.typing = false;
                     help.query.clear();
-                    help.search(&mut self.matcher);
+                    help.search(&lines, &mut self.matcher);
                 }
                 KeyCode::Enter => help.typing = false,
                 KeyCode::Backspace => {
                     help.query.pop();
-                    help.search(&mut self.matcher);
+                    help.search(&lines, &mut self.matcher);
                 }
                 KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => {
                     help.query.push(c);
-                    help.search(&mut self.matcher);
+                    help.search(&lines, &mut self.matcher);
                 }
                 _ => {}
             }
@@ -1614,13 +1651,13 @@ impl App {
         match key.code {
             KeyCode::Esc if !help.query.is_empty() => {
                 help.query.clear();
-                help.search(&mut self.matcher);
+                help.search(&lines, &mut self.matcher);
             }
             KeyCode::Esc | KeyCode::Char('q' | '?') => self.mode = Mode::Normal,
             KeyCode::Char('/') => {
                 help.typing = true;
                 help.query.clear();
-                help.search(&mut self.matcher);
+                help.search(&lines, &mut self.matcher);
             }
             KeyCode::Char('n') if !ctrl => help.next_match(true),
             KeyCode::Char('N') => help.next_match(false),
@@ -3207,5 +3244,25 @@ mod tests {
             app.on_key(ch(c));
             assert!(matches!(app.mode, Mode::Normal));
         }
+    }
+
+    #[test]
+    fn remapped_pane_keys() {
+        use crate::keys::KeyList;
+        let config: std::collections::BTreeMap<String, KeyList> =
+            [("zoom".to_string(), KeyList::One("ctrl-alt-z".into()))].into_iter().collect();
+        let mut app = app_with_two_columns();
+        app.keymap = Keymap::from_config(&config).0;
+        app.focus_pane(0, 0);
+        // The old key is free: it goes to the session.
+        app.on_key(alt('f'));
+        assert!(!app.zoomed);
+        assert!(matches!(app.request.take(), Some(Request::Input(..))));
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL | KeyModifiers::ALT));
+        assert!(app.zoomed);
+        // The help and the footer show the new key.
+        assert_eq!(key_label(&app.keymap, "Alt-f / Alt-z"), "Ctrl-Alt-z");
+        assert_eq!(key_label(&app.keymap, "Alt-hjkl"), "Alt-hjkl");
+        assert!(help_lines(&app.keymap).iter().any(|(k, _)| k == "Ctrl-Alt-z"));
     }
 }

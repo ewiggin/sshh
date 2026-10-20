@@ -4,6 +4,10 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
 ## 0.9.4 — 2026-10-20
 
+- **Custom shortcuts.** The pane shortcuts (the `Alt` keys) can be changed in a `[keys]` table of
+  `~/.config/sshh/config.toml` (e.g. `zoom = "ctrl-alt-z"`); the help and the footer show the keys in
+  use. `sshh config` prints the settings in use and `sshh config init` writes a commented config
+  file ([#4](https://github.com/ewiggin/sshh/issues/4)).
 - **Panes on startup.** `*` in the Layouts tab makes a layout open when `sshh` starts (marked `★`);
   without one, `restore_panes = true` in `~/.config/sshh/config.toml` brings back the panes you had
   when you quit. They open without connecting: `Enter` connects each pane

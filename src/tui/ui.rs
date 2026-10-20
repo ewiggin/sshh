@@ -14,7 +14,7 @@ use tui_term::widget::{Cursor, PseudoTerminal};
 
 use super::app::{
     App, Focus, ListTab, MIN_COLUMN_WIDTH, Mode, Pane, SessionKey, SessionKind, SessionState, ThemePicker,
-    HELP, HelpState,
+    HELP, HelpState, help_lines, key_label,
 };
 use super::session::Session;
 use crate::cli::{format_date, relative_time, short_age};
@@ -99,7 +99,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
     }
     draw_footer(frame, app, footer);
     match &mut app.mode {
-        Mode::Help(help) => draw_help(frame, help),
+        Mode::Help(help) => draw_help(frame, help, &help_lines(&app.keymap)),
         Mode::Form(form) => form.render(frame),
         Mode::ConfirmDelete { alias } => draw_confirm(
             frame,
@@ -542,7 +542,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     let (body, history) = match host {
-        Some(host) => (overview_lines(host), history_lines(app)),
+        Some(host) => (overview_lines(host, &app.keymap), history_lines(app)),
         None if app.hosts.is_empty() => (
             vec![
                 Line::from("No saved connections.".bold()),
@@ -684,7 +684,7 @@ fn draw_pane(
         title.push_str(&format!(" · scrolled back {}", screen.scrollback()));
     }
     if app.zoomed {
-        title.push_str(" · full screen (Alt-f)");
+        title.push_str(&format!(" · full screen ({})", app.keymap.first(crate::keys::Action::Zoom)));
     }
     // Broadcast: mark every pane that gets what is typed in the active one.
     let receiving = app.broadcast
@@ -739,15 +739,13 @@ fn draw_pane(
     }
 }
 
-fn overview_lines(host: &Host) -> Vec<Line<'static>> {
-    let key = |k: &'static str, desc: &'static str| {
-        Line::from(vec![format!("{k:<7}").fg(ACCENT).bold(), desc.into()])
-    };
+fn overview_lines(host: &Host, keymap: &crate::keys::Keymap) -> Vec<Line<'static>> {
+    let key = |k: &str, desc: &'static str| Line::from(vec![format!("{k:<7}").fg(ACCENT).bold(), desc.into()]);
     vec![
         Line::from(vec![host.data.alias.clone().bold(), " — ".dim(), host.data.target().into()]),
         Line::default(),
         key("Space", "open a session here"),
-        key("Alt-v", "open it in a new column"),
+        key(&key_label(keymap, "Alt-v"), "open it in a new column"),
         key("f", "full-screen ssh"),
         key("s", "sftp in a new column"),
         key("c", "install your public key (ssh-copy-id)"),
@@ -774,7 +772,7 @@ fn history_lines(app: &App) -> Vec<Line<'static>> {
 fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
     if app.broadcast {
         // Always visible, even over a status message.
-        let badge = " BROADCAST · Alt-a stops ";
+        let badge = format!(" BROADCAST · {} stops ", app.keymap.first(crate::keys::Action::Broadcast));
         let [left, rest] =
             Layout::horizontal([Constraint::Length(badge.chars().count() as u16), Constraint::Fill(1)]).areas(area);
         frame.render_widget(Line::from(badge.fg(BROADCAST).bold().reversed()), left);
@@ -854,7 +852,9 @@ fn draw_footer(frame: &mut Frame, app: &App, mut area: Rect) {
     };
     let mut spans: Vec<Span> = keys
         .iter()
-        .flat_map(|(k, desc)| [format!(" {k} ").fg(ACCENT).bold(), format!("{desc} ").dim()])
+        .flat_map(|(k, desc)| {
+            [format!(" {} ", key_label(&app.keymap, k)).fg(ACCENT).bold(), format!("{desc} ").dim()]
+        })
         .collect();
     if let Some(c) = app.pending {
         spans.insert(0, format!(" {c}… ").fg(Color::Yellow).bold());
@@ -896,12 +896,12 @@ fn draw_layout_name(frame: &mut Frame, name: &str, rename: bool) {
 }
 
 /// The help, scrollable, with the matches of its search highlighted.
-fn draw_help(frame: &mut Frame, help: &mut HelpState) {
+fn draw_help(frame: &mut Frame, help: &mut HelpState, help_lines: &[(String, &str)]) {
     let area = centered(frame.area(), 74, (HELP.len() as u16 + 2).min(frame.area().height));
     help.height = usize::from(area.height.saturating_sub(2));
     help.clamp_scroll();
     let current = help.current_line();
-    let lines: Vec<Line> = HELP
+    let lines: Vec<Line> = help_lines
         .iter()
         .enumerate()
         .skip(help.scroll)
