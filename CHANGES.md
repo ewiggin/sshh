@@ -8,6 +8,11 @@ All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
   without one, `restore_panes = true` in `~/.config/sshh/config.toml` brings back the panes you had
   when you quit. They open without connecting: `Enter` connects each pane
   ([#21](https://github.com/ewiggin/sshh/issues/21)).
+- **Nicer selection.** The selected row in the lists, the theme picker and the help is no longer
+  reverse video (a light gray bar with colored backgrounds): it gets a subtle band that keeps the
+  colors of its text, plus an accent mark `▌` and bold while the list has the focus. In sshh
+  themes the band is a tint of the accent (`selection` in the theme's `[ui]` to change it); with
+  the `terminal` theme it is color8.
 
 ## 0.9.3 — 2026-10-17
 
