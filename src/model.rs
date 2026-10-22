@@ -36,6 +36,9 @@ pub struct HostData {
     pub notes: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Shown at the top of the list.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 impl HostData {
@@ -242,5 +245,15 @@ mod tests {
         for s in ["10.0.0.5:22", "deploy@10.0.0.5", "@h:22", "u@:22", "u@h:x", "u@h:99999", "ssh://u@h:22", "u@[::1]:22"] {
             assert_eq!(Endpoint::parse(s), None, "{s}");
         }
+    }
+
+    #[test]
+    fn pinned_is_omitted_from_json_when_false() {
+        let data = HostData { alias: "a".into(), hostname: "h".into(), ..Default::default() };
+        assert!(!serde_json::to_string(&data).unwrap().contains("pinned"));
+        let pinned = HostData { pinned: true, ..data };
+        let json = serde_json::to_string(&pinned).unwrap();
+        assert!(json.contains("\"pinned\":true"));
+        assert_eq!(serde_json::from_str::<HostData>(&json).unwrap(), pinned);
     }
 }

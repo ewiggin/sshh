@@ -418,8 +418,18 @@ Install your public key with
 .B sshh
 comes back when it exits).
 .TP
+.B *
+Pin the selected connection to the top of the list (marked \[u2605]; again
+to unpin).
+Pinned connections stay on top unless the search has words: then the best
+match comes first and pinning only breaks ties.
+.TP
 .B o
-Change the sort order: recent, most used, alphabetical.
+Change the sort order: frecency (the default: number of connections
+weighted by how recent the last one is), recent, most used, alphabetical.
+The choice is saved as
+.B sort
+in the config file.
 .TP
 .B R
 Reload the list.
@@ -770,10 +780,13 @@ Generated ssh_config file, only when enabled with
 .TP
 .I ~/.config/sshh/config.toml
 Settings:
-.B theme
-and
+.BR theme ,
 .B restore_panes
 (reopen the panes of the last session on startup, without connecting)
+and
+.B sort
+(order of the list:
+.BR frecency ", " recent ", " most\-used " or " alphabetical )
 .RI ( $XDG_CONFIG_HOME/sshh/config.toml
 if set; the same path on macOS).
 .TP

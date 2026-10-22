@@ -57,7 +57,8 @@ pub const HELP: &[(&str, &str)] = &[
     ("yy", "copy the ssh command"),
     ("s", "sftp in a new column, next to the ssh one"),
     ("c", "install your public key (ssh-copy-id)"),
-    ("o", "change sort (recent / most used / alphabetical)"),
+    ("*", "pin to the top of the list / unpin ★"),
+    ("o", "change sort (frecency / recent / most used / alphabetical)"),
     ("R", "reload"),
     ("T", "theme (shown while moving, Enter saves)"),
     ("q / Ctrl-c", "quit"),
@@ -163,6 +164,10 @@ pub enum Request {
     Themes,
     /// Save the theme in config.toml.
     SaveTheme(String),
+    /// Save the list order in config.toml.
+    SaveSort(SortOrder),
+    /// Pin a connection to the top of the list (or unpin it).
+    Pin { id: i64, pinned: bool },
 }
 
 /// A pane of the terminal columns: (column, row inside the column).
@@ -336,34 +341,53 @@ pub struct ThemePicker {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SortOrder {
+    /// Use count weighted by how recent the last connection is.
     #[default]
+    Frecency,
     Recent,
     MostUsed,
     Alias,
 }
 
 impl SortOrder {
+    pub const ALL: [Self; 4] = [Self::Frecency, Self::Recent, Self::MostUsed, Self::Alias];
+
     pub fn label(self) -> &'static str {
         match self {
+            Self::Frecency => "frecency",
             Self::Recent => "recent",
             Self::MostUsed => "most used",
             Self::Alias => "alphabetical",
         }
     }
 
-    fn next(self) -> Self {
+    /// Name in config.toml (`sort = "most-used"`).
+    pub fn name(self) -> &'static str {
         match self {
-            Self::Recent => Self::MostUsed,
-            Self::MostUsed => Self::Alias,
-            Self::Alias => Self::Recent,
+            Self::MostUsed => "most-used",
+            other => other.label(),
         }
     }
 
-    fn compare(self, a: &Host, b: &Host) -> std::cmp::Ordering {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|&s| s == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// Pinned connections first, then by this order. `now` is for frecency.
+    fn compare(self, a: &Host, b: &Host, now: i64) -> std::cmp::Ordering {
         // `Reverse(Option)`: None (never used) goes last.
         let recent = |h: &Host| std::cmp::Reverse(h.last_used);
         let alias = |h: &Host| h.data.alias.to_lowercase();
-        match self {
+        let by_order = match self {
+            Self::Frecency => frecency(b, now)
+                .cmp(&frecency(a, now))
+                .then_with(|| recent(a).cmp(&recent(b)))
+                .then_with(|| alias(a).cmp(&alias(b))),
             Self::Recent => recent(a).cmp(&recent(b)).then_with(|| alias(a).cmp(&alias(b))),
             Self::MostUsed => b
                 .use_count
@@ -371,8 +395,25 @@ impl SortOrder {
                 .then_with(|| recent(a).cmp(&recent(b)))
                 .then_with(|| alias(a).cmp(&alias(b))),
             Self::Alias => alias(a).cmp(&alias(b)),
-        }
+        };
+        b.data.pinned.cmp(&a.data.pinned).then(by_order)
     }
+}
+
+/// Use count weighted by the age of the last connection (buckets like
+/// Firefox's frecency): a host used often long ago ranks below one used a
+/// few times this week.
+fn frecency(host: &Host, now: i64) -> i64 {
+    const DAY: i64 = 24 * 60 * 60;
+    let Some(last) = host.last_used else { return 0 };
+    let weight = match now - last {
+        age if age < 4 * DAY => 100,
+        age if age < 14 * DAY => 70,
+        age if age < 31 * DAY => 50,
+        age if age < 90 * DAY => 30,
+        _ => 10,
+    };
+    host.use_count * weight
 }
 
 /// Tabs of the list pane.
@@ -736,6 +777,14 @@ impl App {
         }
     }
 
+    /// Reorders the list keeping the selected connection.
+    pub fn set_sort(&mut self, sort: SortOrder) {
+        self.sort = sort;
+        let selected = self.selected_host().map(|h| h.id);
+        let hosts = std::mem::take(&mut self.hosts);
+        self.set_hosts(hosts, selected);
+    }
+
     /// Result of a `Save` request.
     pub fn on_saved(&mut self, result: Result<(i64, Vec<Host>), String>) {
         match result {
@@ -797,7 +846,8 @@ impl App {
         let pattern = Pattern::parse(&words, CaseMatching::Smart, Normalization::Smart);
 
         let mut order: Vec<usize> = (0..self.hosts.len()).collect();
-        order.sort_by(|&a, &b| self.sort.compare(&self.hosts[a], &self.hosts[b]));
+        let now = crate::db::now();
+        order.sort_by(|&a, &b| self.sort.compare(&self.hosts[a], &self.hosts[b], now));
 
         let mut scored = Vec::new();
         let mut buf = Vec::new();
@@ -1687,11 +1737,14 @@ impl App {
             KeyCode::Char('c') => self.run_selected(External::SshCopyId),
             KeyCode::Char('x') => self.close_selected(),
             KeyCode::Char('o') => {
-                self.sort = self.sort.next();
-                let selected = self.selected_host().map(|h| h.id);
-                let hosts = std::mem::take(&mut self.hosts);
-                self.set_hosts(hosts, selected);
+                self.set_sort(self.sort.next());
                 self.info(format!("Sort: {}", self.sort.label()));
+                self.request = Some(Request::SaveSort(self.sort));
+            }
+            KeyCode::Char('*') => {
+                if let Some(host) = self.selected_host() {
+                    self.request = Some(Request::Pin { id: host.id, pinned: !host.data.pinned });
+                }
             }
             KeyCode::Char(c @ ('g' | 'd' | 'y')) if !ctrl => {
                 if pending == Some(c) {
@@ -2362,8 +2415,12 @@ mod tests {
         app.set_layouts(vec![Layout { default: true, ..layout() }], None);
         app.on_key(ch('*'));
         assert_eq!(app.request.take(), Some(Request::DefaultLayout(None)));
-        // Elsewhere `*` does nothing.
+        // On a connection it pins it; on a tag it does nothing.
         app.on_key(key(KeyCode::Esc));
+        app.on_key(ch('*'));
+        assert_eq!(app.request.take(), Some(Request::Pin { id: 1, pinned: true }));
+        app.on_key(ch(']'));
+        assert_eq!(app.tab, ListTab::Tags);
         app.on_key(ch('*'));
         assert_eq!(app.request, None);
     }
@@ -2960,26 +3017,68 @@ mod tests {
 
     #[test]
     fn sort_orders() {
+        const DAY: i64 = 24 * 60 * 60;
+        let now = crate::db::now();
         let mut hosts = vec![
             host(1, "b", "", &[]),
             host(2, "A", "", &[]),
             host(3, "c", "", &[]),
+            host(4, "d", "", &[]),
         ];
-        hosts[0].last_used = Some(10);
-        hosts[0].use_count = 1;
-        hosts[2].last_used = Some(20);
+        // b: 3 times this week; A: 20 times months ago (10 × 20 = 200 < 300);
+        // c: once, most recent; d: never.
+        hosts[0].last_used = Some(now - DAY);
+        hosts[0].use_count = 3;
+        hosts[1].last_used = Some(now - 200 * DAY);
+        hosts[1].use_count = 20;
+        hosts[2].last_used = Some(now - 60);
         hosts[2].use_count = 1;
-        hosts[1].last_used = Some(5);
-        hosts[1].use_count = 7;
         let mut app = App::new(hosts);
-        assert_eq!(aliases(&app), ["c", "b", "A"]);
+        assert_eq!(app.sort, SortOrder::Frecency);
+        assert_eq!(aliases(&app), ["b", "A", "c", "d"]);
+        app.on_key(ch('o'));
+        assert_eq!(app.sort, SortOrder::Recent);
+        assert_eq!(app.request.take(), Some(Request::SaveSort(SortOrder::Recent)));
+        assert_eq!(aliases(&app), ["c", "b", "A", "d"]);
         app.on_key(ch('o'));
         assert_eq!(app.sort, SortOrder::MostUsed);
-        assert_eq!(aliases(&app), ["A", "c", "b"]);
+        assert_eq!(aliases(&app), ["A", "b", "c", "d"]);
         app.on_key(ch('o'));
-        assert_eq!(aliases(&app), ["A", "b", "c"]);
+        assert_eq!(aliases(&app), ["A", "b", "c", "d"]);
         // The selection stays on the same connection.
-        assert_eq!(app.selected_host().unwrap().data.alias, "c");
+        assert_eq!(app.selected_host().unwrap().data.alias, "b");
+        app.on_key(ch('o'));
+        assert_eq!(app.sort, SortOrder::Frecency);
+    }
+
+    #[test]
+    fn sort_names_round_trip() {
+        for sort in SortOrder::ALL {
+            assert_eq!(SortOrder::from_name(sort.name()), Some(sort));
+        }
+        assert_eq!(SortOrder::from_name("most-used"), Some(SortOrder::MostUsed));
+        assert_eq!(SortOrder::from_name("nope"), None);
+    }
+
+    #[test]
+    fn pinned_go_first_unless_searching() {
+        let mut hosts = vec![
+            host(1, "web", "", &["prod"]),
+            host(2, "webserver", "", &["prod"]),
+            host(3, "w-x-e-x-b", "", &[]),
+        ];
+        hosts[1].data.pinned = true;
+        hosts[2].data.pinned = true;
+        let mut app = App::new(hosts);
+        app.set_sort(SortOrder::Alias);
+        assert_eq!(aliases(&app), ["w-x-e-x-b", "webserver", "web"]);
+        // A tag filter keeps them on top.
+        type_query(&mut app, "#prod");
+        assert_eq!(aliases(&app), ["webserver", "web"]);
+        // With words the best match wins; pinning only breaks ties.
+        app.query.clear();
+        type_query(&mut app, "web");
+        assert_eq!(aliases(&app), ["webserver", "web", "w-x-e-x-b"]);
     }
 
     #[test]

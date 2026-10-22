@@ -289,6 +289,9 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
             (_, Some(t)) => short_age(now - t),
         };
         let mut spans = highlighted(&d.alias, &e.alias_hl);
+        if d.pinned {
+            spans.push(" ★".fg(MATCH));
+        }
         if let Some(name) = &d.name {
             spans.push(Span::raw("  "));
             spans.extend(highlighted(name, &e.name_hl).into_iter().map(|s| s.dim()));

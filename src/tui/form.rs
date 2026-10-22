@@ -140,6 +140,8 @@ pub struct Form {
     pub fields: Vec<Field>,
     pub focus: usize,
     pub error: Option<String>,
+    /// Not a field: kept as it was (pinning is done from the list).
+    pinned: bool,
     /// Field areas from the last render (for the mouse).
     areas: Vec<Rect>,
 }
@@ -165,7 +167,7 @@ impl Form {
             data.extra_options.iter().map(|o| format!("{}={}", o.key, o.value)).collect();
         fields[OPTIONS] = Field::new(options.join("\n"));
         fields[NOTES] = Field::new(opt(&data.notes));
-        Self { kind, fields, focus: ALIAS, error: None, areas: Vec::new() }
+        Self { kind, fields, focus: ALIAS, error: None, pinned: data.pinned, areas: Vec::new() }
     }
 
     pub fn focus(mut self, field: usize) -> Self {
@@ -241,6 +243,7 @@ impl Form {
             description: optional(DESCRIPTION),
             notes: Some(notes).filter(|n| !n.is_empty()),
             tags,
+            pinned: self.pinned,
         })
     }
 

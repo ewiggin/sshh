@@ -22,7 +22,7 @@ use ratatui::text::Line;
 use crate::db::{self, Db};
 use crate::model::{Host, HostData};
 use crate::{config, connect, include, theme};
-use app::{App, External, Focus, Mode, Outcome, Request, SessionKey, SessionKind, SessionState};
+use app::{App, External, Focus, Mode, Outcome, Request, SessionKey, SessionKind, SessionState, SortOrder};
 use form::{Form, FormEvent, FormKind};
 use session::{CopyAction, Session};
 
@@ -38,13 +38,20 @@ pub fn run() -> Result<()> {
     if let Some(warning) = warning {
         app.error(warning);
     }
-    let restore_panes = match config::load() {
-        Ok(config) => config.restore_panes,
-        Err(e) => {
-            app.error(format!("{e:#}"));
-            false
+    let config = config::load().unwrap_or_else(|e| {
+        app.error(format!("{e:#}"));
+        config::Config::default()
+    });
+    let restore_panes = config.restore_panes;
+    if let Some(name) = &config.sort {
+        match SortOrder::from_name(name) {
+            Some(sort) => app.set_sort(sort),
+            None => {
+                let names: Vec<_> = SortOrder::ALL.iter().map(|s| format!("'{}'", s.name())).collect();
+                app.error(format!("Unknown sort '{name}' in config.toml (use {})", names.join(", ")));
+            }
         }
-    };
+    }
     // Opened after the first draw, when the screen size is known.
     let startup = db.startup_layout(restore_panes).unwrap_or_else(|e| {
         app.error(format!("Could not restore the panes: {e:#}"));
@@ -405,6 +412,19 @@ fn handle_request(
                 app.info(text);
             }
             Err(e) => app.error(format!("Could not save the theme: {e:#}")),
+        },
+        Request::SaveSort(sort) => {
+            if let Err(e) = config::save_key("sort", sort.name()) {
+                app.error(format!("Could not save the sort: {e:#}"));
+            }
+        }
+        Request::Pin { id, pinned } => match db.set_pinned(id, pinned) {
+            Ok(()) => {
+                app.set_hosts(db.list_hosts()?, Some(id));
+                let alias = app.selected_host().map(|h| h.data.alias.clone()).unwrap_or_default();
+                app.info(if pinned { format!("Pinned '{alias}'") } else { format!("Unpinned '{alias}'") });
+            }
+            Err(e) => app.error(format!("Could not pin the connection: {e:#}")),
         },
     }
     Ok(())
