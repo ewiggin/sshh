@@ -346,6 +346,15 @@ fn handle_request(
                 n => app.info(format!("{n} sessions closed")),
             }
         }
+        Request::CloseAllSessions => {
+            let closed = sessions.len();
+            sessions.clear();
+            match closed {
+                0 => app.info("Panes closed"),
+                1 => app.info("Session closed"),
+                n => app.info(format!("{n} sessions closed")),
+            }
+        }
         Request::Input(id, key) => {
             for id in app.input_targets(id) {
                 if let Some(session) = sessions.get_mut(&id) {

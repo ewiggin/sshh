@@ -117,6 +117,11 @@ pub fn draw(frame: &mut Frame, app: &mut App, sessions: &HashMap<SessionKey, Ses
             vec!["Close the session of ".into(), alias.clone().bold(), "?".into()],
             "close",
         ),
+        Mode::ConfirmCloseAll { sessions } => draw_confirm(
+            frame,
+            vec![format!("Close {sessions} open session(s) and every pane?").into()],
+            "close",
+        ),
         Mode::ConfirmQuit { sessions } => draw_confirm(
             frame,
             vec![format!("Close {sessions} open session(s) and quit?").into()],

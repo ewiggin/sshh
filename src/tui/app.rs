@@ -35,6 +35,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("Alt-s", "history mode: j/k, / search, n/N, v select, y copy"),
     ("Alt-a", "broadcast: type in every visible pane (toggle)"),
     ("x", "close the connection's sessions (ssh and sftp)"),
+    ("X", "close every session and pane"),
     ("f", "full-screen ssh (back to sshh on exit)"),
     ("", ""),
     ("j/k ↑/↓", "move"),
@@ -144,6 +145,8 @@ pub enum Request {
     DeleteLayout(String),
     /// Close every session of a connection.
     CloseSessions(i64),
+    /// Close every session.
+    CloseAllSessions,
     /// Input for an embedded session.
     Input(SessionKey, KeyEvent),
     Paste(SessionKey, String),
@@ -223,6 +226,8 @@ pub enum Mode {
     ConfirmDeleteLayout { name: String },
     ConfirmClose { id: i64, alias: String },
     ConfirmQuit { sessions: usize },
+    /// Close every session (`sessions` of them are alive).
+    ConfirmCloseAll { sessions: usize },
     Themes(ThemePicker),
 }
 
@@ -1579,6 +1584,12 @@ impl App {
                 }
                 self.mode = Mode::Normal;
             }
+            Mode::ConfirmCloseAll { .. } => {
+                self.mode = Mode::Normal;
+                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.close_all();
+                }
+            }
             _ if ctrl && key.code == KeyCode::Char('c') => self.quit(),
             Mode::Help(_) => self.on_help_key(key, ctrl),
             Mode::Search => self.on_search_key(key, ctrl),
@@ -1686,6 +1697,10 @@ impl App {
             KeyCode::Char('s') => self.open_in_column(SessionKind::Sftp, true),
             KeyCode::Char('c') => self.run_selected(External::SshCopyId),
             KeyCode::Char('x') => self.close_selected(),
+            KeyCode::Char('X') => match self.alive_sessions() {
+                0 => self.close_all(),
+                sessions => self.mode = Mode::ConfirmCloseAll { sessions },
+            },
             KeyCode::Char('o') => {
                 self.sort = self.sort.next();
                 let selected = self.selected_host().map(|h| h.id);
@@ -1751,6 +1766,20 @@ impl App {
             }
             None => {}
         }
+    }
+
+    /// Closes every session and pane.
+    fn close_all(&mut self) {
+        if self.sessions.is_empty() && self.columns.is_empty() {
+            self.info("No sessions open");
+            return;
+        }
+        self.request = Some(Request::CloseAllSessions);
+        let hosts: Vec<i64> = self.columns.iter().flatten().map(|k| k.host).collect();
+        for host in hosts {
+            self.remove_columns_of_host(host);
+        }
+        self.focus = Focus::List;
     }
 
     fn edit_selected(&mut self, focus: usize) {
@@ -1834,7 +1863,7 @@ impl App {
         match (&mut self.mode, mouse.kind) {
             (Mode::Form(form), MouseEventKind::Down(MouseButton::Left)) => form.on_click(pos),
             (Mode::Form(_) | Mode::ConfirmDelete { .. } | Mode::ConfirmClose { .. }, _) => {}
-            (Mode::ConfirmQuit { .. }, _) => {}
+            (Mode::ConfirmQuit { .. } | Mode::ConfirmCloseAll { .. }, _) => {}
             (Mode::Help(_), MouseEventKind::Down(_)) => self.mode = Mode::Normal,
             (Mode::Help(help), MouseEventKind::ScrollDown) => help.scroll_by(3),
             (Mode::Help(help), MouseEventKind::ScrollUp) => help.scroll_by(-3),
@@ -2875,6 +2904,41 @@ mod tests {
         app.request = None;
         app.on_key(ch(' '));
         assert!(matches!(&app.request, Some(Request::OpenSession(h, SessionKind::Ssh)) if h.id == 3));
+    }
+
+    #[test]
+    fn shift_x_closes_every_session_and_pane() {
+        let mut app = app_with_sessions();
+        app.on_key(ch(' '));
+        app.on_key(alt('h'));
+        app.on_key(ch('j'));
+        app.on_key(alt('v'));
+        app.on_key(alt('h'));
+        app.on_key(alt('h'));
+        assert_eq!(app.focus, Focus::List);
+        assert_eq!(app.columns.len(), 2);
+        app.request = None;
+        // One session is alive: it asks first; anything but `y` cancels.
+        app.on_key(ch('X'));
+        assert!(matches!(app.mode, Mode::ConfirmCloseAll { sessions: 1 }));
+        app.on_key(ch('n'));
+        assert_eq!(app.request, None);
+        assert_eq!(app.columns.len(), 2);
+        app.on_key(ch('X'));
+        app.on_key(ch('y'));
+        assert_eq!(app.request.take(), Some(Request::CloseAllSessions));
+        assert!(app.columns.is_empty());
+        assert_eq!(app.focus, Focus::List);
+
+        // Only ended sessions: no question.
+        app.sessions.remove(&SessionKey::ssh(2));
+        app.on_key(ch('X'));
+        assert_eq!(app.request.take(), Some(Request::CloseAllSessions));
+        // Nothing open: just a message.
+        app.sessions.clear();
+        app.on_key(ch('X'));
+        assert_eq!(app.request, None);
+        assert_eq!(app.status.as_ref().unwrap().text, "No sessions open");
     }
 
     #[test]

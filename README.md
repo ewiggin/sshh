@@ -312,6 +312,7 @@ List and general keys:
 | Key | Action |
 |---|---|
 | `x` | close the selected connection's sessions, ssh and sftp (asks first) |
+| `X` | close every session and pane (asks first if a session is alive) |
 | `f` | full-screen ssh, as a plain terminal; you come back to `sshh` when it exits |
 | `j` / `k`, `↓` / `↑` | move |
 | `gg` / `G` | go to top / bottom |

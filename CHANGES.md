@@ -2,6 +2,11 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
+## Unreleased
+
+- **Close everything.** `X` closes every session and pane at once (asking first if a session is
+  alive) ([#34](https://github.com/ewiggin/sshh/issues/34)).
+
 ## 0.9.4 — 2026-10-20
 
 - **Panes on startup.** `*` in the Layouts tab makes a layout open when `sshh` starts (marked `★`);
