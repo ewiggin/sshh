@@ -2,6 +2,14 @@
 
 All notable changes to sshh, newest first. Versions match the git tags `vX.Y.Z`.
 
+## Unreleased
+
+- **Favorites and frecency.** `*` pins a connection to the top of the list (marked `★`; again to
+  unpin). The list is now sorted by frecency by default (connections weighted by how recent they
+  are), and the order chosen with `o` is remembered (`sort` in `~/.config/sshh/config.toml`).
+  While searching, the best match still comes first. Pins travel in `sshh export`/`import`
+  ([#22](https://github.com/ewiggin/sshh/issues/22)).
+
 ## 0.9.4 — 2026-10-20
 
 - **Panes on startup.** `*` in the Layouts tab makes a layout open when `sshh` starts (marked `★`);
