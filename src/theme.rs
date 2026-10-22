@@ -327,36 +327,7 @@ pub fn current() -> (Theme, Option<String>) {
 
 /// Sets `theme = "<name>"` in config.toml, keeping the rest of the file.
 pub fn save(name: &str) -> Result<PathBuf> {
-    let path = config::file()?;
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-    };
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    }
-    fs::write(&path, set_theme(&text, name)).with_context(|| format!("writing {}", path.display()))?;
-    Ok(path)
-}
-
-/// `text` with its top-level `theme = …` line set to `name` (added at the top
-/// if there is none).
-fn set_theme(text: &str, name: &str) -> String {
-    let line = format!("theme = {}", toml::Value::String(name.into()));
-    let mut lines: Vec<String> = text.lines().map(String::from).collect();
-    // Top-level keys go before the first table.
-    let top = lines.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(lines.len());
-    let existing = lines[..top].iter().position(|l| {
-        l.trim_start().strip_prefix("theme").is_some_and(|rest| rest.trim_start().starts_with('='))
-    });
-    match existing {
-        Some(i) => lines[i] = line,
-        None => lines.insert(0, line),
-    }
-    let mut out = lines.join("\n");
-    out.push('\n');
-    out
+    config::save_key("theme", name)
 }
 
 #[cfg(test)]
@@ -481,18 +452,5 @@ mod tests {
         assert!(matches!(find("gruvbox-dark"), Some(Source::Builtin(_))));
         assert_eq!(find("notes"), None);
         assert_eq!(themes.len(), BUILTIN.len() + 2);
-    }
-
-    #[test]
-    fn set_theme_keeps_the_rest_of_the_file() {
-        assert_eq!(set_theme("", "monokai"), "theme = \"monokai\"\n");
-        assert_eq!(
-            set_theme("# mine\ntheme = \"old\"\nother = 1\n", "gruvbox-dark"),
-            "# mine\ntheme = \"gruvbox-dark\"\nother = 1\n"
-        );
-        // A `theme` key inside a table is not the top-level one.
-        assert_eq!(set_theme("[x]\ntheme = 1\n", "a"), "theme = \"a\"\n[x]\ntheme = 1\n");
-        let config: crate::config::Config = toml::from_str(&set_theme("# c\n", "m")).unwrap();
-        assert_eq!(config.theme.as_deref(), Some("m"));
     }
 }

@@ -68,11 +68,13 @@ CREATE TABLE ignored (
 );
 "#, r#"
 ALTER TABLE layouts ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
+"#, r#"
+ALTER TABLE hosts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
 "#];
 
 const HOST_SELECT: &str = "
 SELECT h.id, h.alias, h.hostname, h.user, h.port, h.identity_file, h.proxy_jump, h.tmux_session,
-       h.extra_options, h.name, h.description, h.notes, h.created_at, h.updated_at,
+       h.extra_options, h.name, h.description, h.notes, h.created_at, h.updated_at, h.pinned,
        (SELECT MAX(connected_at) FROM history WHERE host_id = h.id) AS last_used,
        (SELECT COUNT(*) FROM history WHERE host_id = h.id) AS use_count
 FROM hosts h";
@@ -158,6 +160,8 @@ impl Db {
                 report.added.push(data.alias.clone());
                 continue;
             };
+            // Imports can pin but never unpin (ssh_config has no pins).
+            let data = &HostData { pinned: data.pinned || existing.data.pinned, ..data.clone() };
             if same_data(&existing.data, data) {
                 report.unchanged.push(data.alias.clone());
                 continue;
@@ -181,6 +185,14 @@ impl Db {
             tx.commit()?;
         }
         Ok(report)
+    }
+
+    /// Pins or unpins a connection (without touching `updated_at`).
+    pub fn set_pinned(&self, id: i64, pinned: bool) -> Result<()> {
+        if self.conn.execute("UPDATE hosts SET pinned = ?2 WHERE id = ?1", params![id, pinned])? == 0 {
+            bail!("the connection no longer exists");
+        }
+        Ok(())
     }
 
     pub fn delete_by_alias(&self, alias: &str) -> Result<bool> {
@@ -451,8 +463,8 @@ fn insert_in(conn: &Connection, data: &HostData) -> Result<i64> {
     let inserted = conn.execute(
         "INSERT INTO hosts (alias, hostname, user, port, identity_file, proxy_jump,
                             extra_options, name, description, notes, created_at, updated_at,
-                            tmux_session)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12)",
+                            tmux_session, pinned)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13)",
         params![
             data.alias,
             data.hostname,
@@ -466,6 +478,7 @@ fn insert_in(conn: &Connection, data: &HostData) -> Result<i64> {
             data.notes,
             now,
             data.tmux_session,
+            data.pinned,
         ],
     );
     check_alias_conflict(inserted, &data.alias)?;
@@ -481,7 +494,7 @@ fn update_in(conn: &Connection, id: i64, data: &HostData) -> Result<()> {
     let updated = conn.execute(
         "UPDATE hosts SET alias = ?2, hostname = ?3, user = ?4, port = ?5, identity_file = ?6,
                           proxy_jump = ?7, extra_options = ?8, name = ?9, description = ?10,
-                          notes = ?11, updated_at = ?12, tmux_session = ?13
+                          notes = ?11, updated_at = ?12, tmux_session = ?13, pinned = ?14
          WHERE id = ?1",
         params![
             id,
@@ -497,6 +510,7 @@ fn update_in(conn: &Connection, id: i64, data: &HostData) -> Result<()> {
             data.notes,
             now(),
             data.tmux_session,
+            data.pinned,
         ],
     );
     if check_alias_conflict(updated, &data.alias)? == 0 {
@@ -613,6 +627,7 @@ fn host_from_row(row: &Row) -> rusqlite::Result<Host> {
             description: row.get("description")?,
             notes: row.get("notes")?,
             tags: Vec::new(),
+            pinned: row.get("pinned")?,
         },
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -763,6 +778,32 @@ mod tests {
         let r = db.import_hosts(&[changed], OnConflict::Overwrite, false).unwrap();
         assert_eq!(r.updated, ["a"]);
         assert_eq!(db.find_by_alias("a").unwrap().unwrap().data.hostname, "otro");
+    }
+
+    #[test]
+    fn pinning() {
+        let mut db = Db::open_in_memory().unwrap();
+        let a = db.insert_host(&sample("a")).unwrap();
+        db.insert_host(&HostData { pinned: true, ..sample("b") }).unwrap();
+        assert!(db.find_by_alias("b").unwrap().unwrap().data.pinned);
+
+        db.set_pinned(a, true).unwrap();
+        let host = db.find_by_alias("a").unwrap().unwrap();
+        assert!(host.data.pinned);
+        // Editing keeps it (the form carries it along).
+        db.update_host(a, &HostData { hostname: "x".into(), ..host.data.clone() }).unwrap();
+        assert!(db.find_by_alias("a").unwrap().unwrap().data.pinned);
+        assert!(db.set_pinned(999, true).is_err());
+
+        // Imports can pin but never unpin: an unpinned copy is unchanged.
+        let r = db.import_hosts(&[HostData { hostname: "x".into(), ..sample("a") }], OnConflict::Skip, false).unwrap();
+        assert_eq!(r.unchanged, ["a"]);
+        let r = db.import_hosts(&[HostData { hostname: "y".into(), ..sample("a") }], OnConflict::Overwrite, false).unwrap();
+        assert_eq!(r.updated, ["a"]);
+        assert!(db.find_by_alias("a").unwrap().unwrap().data.pinned);
+        db.insert_host(&sample("c")).unwrap();
+        db.import_hosts(&[HostData { pinned: true, ..sample("c") }], OnConflict::Overwrite, false).unwrap();
+        assert!(db.find_by_alias("c").unwrap().unwrap().data.pinned);
     }
 
     #[test]

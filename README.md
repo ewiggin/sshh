@@ -262,8 +262,13 @@ background, so it follows your terminal theme (for example, Omarchy themes): bor
 use the theme's blue, its primary accent. If your terminal's colors don't look good (the macOS
 Terminal defaults, for instance), pick one of sshh's [themes](#themes) with `T`.
 
-The list can be sorted by recent use, by number of uses or by alias. If the output isn't a terminal
-(`sshh | less`), it prints the list as text.
+The list is sorted by **frecency** by default: the number of connections weighted by how recent the
+last one is, so a host you used a few times this week ranks above one you used a lot months ago.
+`o` switches to recent use, number of uses or alias, and the choice is remembered (`sort` in
+`~/.config/sshh/config.toml`: `frecency`, `recent`, `most-used` or `alphabetical`). **Pinned**
+connections (`*`, marked `★`) always stay at the top; while searching, the best match comes first
+and pinning only breaks ties. If the output isn't a terminal (`sshh | less`), it prints the list as
+text.
 
 ### Keyboard
 
@@ -328,7 +333,8 @@ List and general keys:
 | `yy` | copy the equivalent `ssh` command to the clipboard |
 | `s` | open `sftp` with the connection in a new column, next to its ssh session |
 | `c` | install your public key on the server (`ssh-copy-id`) |
-| `o` | change sort order: recent → most used → alphabetical |
+| `*` | pin the connection to the top of the list (marked `★`; again to unpin) |
+| `o` | change sort order: frecency → recent → most used → alphabetical (remembered in `config.toml`) |
 | `R` | reload the list |
 | `T` | choose the [theme](#themes): moving shows it, `Enter` saves it, `Esc` goes back to the one you had |
 | `?` | help: `j`/`k`, `Ctrl-d`/`Ctrl-u`, `gg`/`G` or the wheel scroll it; `/` searches it (fuzzy, matches highlighted), `n`/`N` go to the next/previous match; `Esc` clears the search, then closes it (also `q` or `?`) |
@@ -647,7 +653,8 @@ The export includes all the data of every connection, but not the history. Forma
       "name": "Web production",
       "description": "nginx frontend",
       "notes": "Restart: sudo systemctl restart nginx",
-      "tags": ["prod", "web"]
+      "tags": ["prod", "web"],
+      "pinned": true
     }
   ]
 }
@@ -655,7 +662,8 @@ The export includes all the data of every connection, but not the history. Forma
 
 Only `alias` and `hostname` are required. `sshh import` also accepts a plain list
 `[{...}, {...}]`, which makes it easy to generate the file from other tools. Invalid entries are
-skipped with their reason and the rest is imported.
+skipped with their reason and the rest is imported. `pinned` is omitted when false; an import can pin
+an existing connection but never unpins it.
 
 ## History
 
@@ -670,8 +678,8 @@ DATE              ALIAS  COMMAND
 ```
 
 - `sshh history web` shows only one connection's entries; `-n 50` changes the limit (20 by default).
-- In the TUI, the details pane shows the latest 5 of the selected connection, and the list can be
-  sorted by recent use or by number of uses (`o`).
+- In the TUI, the details pane shows the latest 5 of the selected connection, and the list is
+  sorted by frecency, recent use or number of uses (`o`).
 - Calls that only query (`-G`, `-V`, `-O`, `-Q`) and connections to unsaved destinations are not
   recorded.
 
@@ -749,7 +757,7 @@ If you want `sshh` to be the source of truth, you can delete those blocks from y
   and connection history (date and arguments).
 - **No passwords or keys are stored.**
 - The schema migrates itself on startup.
-- Settings (the [theme](#themes) and `restore_panes`) in `~/.config/sshh/config.toml`
+- Settings (the [theme](#themes), `restore_panes` and `sort`) in `~/.config/sshh/config.toml`
   (`$XDG_CONFIG_HOME/sshh/config.toml`) and your themes in `~/.config/sshh/themes/`.
 - Optionally, `~/.ssh/config.d/sshh.conf` (see [Integration](#integration-with-ssh-scp-rsync-git)),
   generated from the database: SQLite remains the source of truth.

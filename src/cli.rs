@@ -384,6 +384,7 @@ fn add_data(args: AddArgs, dest: Option<&Destination>) -> HostData {
         description: args.description,
         notes: args.notes,
         tags: args.tags,
+        pinned: false,
     }
 }
 
